@@ -1,0 +1,27 @@
+{
+  "canisters": {
+    "project_chatgpt_backend": {
+      "candid": "src/project_chatgpt_backend/project_chatgpt_backend.did",
+      "package": "project_chatgpt_backend",
+      "type": "rust"
+    },
+    "project_chatgpt_frontend": {
+      "dependencies": [
+        "project_chatgpt_backend"
+      ],
+      "source": [
+        "src/project_chatgpt_frontend/dist"
+      ],
+      "type": "assets",
+      "workspace": "project_chatgpt_frontend"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
