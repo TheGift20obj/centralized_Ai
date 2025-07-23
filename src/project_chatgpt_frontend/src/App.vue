@@ -1,28 +1,33 @@
 <script setup>
 import { ref } from 'vue';
 import { project_chatgpt_backend } from 'declarations/project_chatgpt_backend/index';
-let greeting = ref('');
+import { login, chatWithBackend } from './main.js';
 
-async function handleSubmit(e) {
-  e.preventDefault();
-  const target = e.target;
-  const name = target.querySelector('#name').value;
-  await project_chatgpt_backend.greet(name).then((response) => {
-    greeting.value = response;
-  });
+const messages = ref([]);
+const userInput = ref('');
+
+async function sendMessage() {
+  messages.value.push({ role: 'user', content: userInput.value });
+
+  try {
+    const reply = await chatWithBackend(userInput.value);
+    messages.value.push({ role: 'ai', content: reply });
+  } catch (error) {
+    messages.value.push({ role: 'ai', content: 'Błąd połączenia! ' + error.message });
+    console.error('Chat error:', error);
+  }
+
+  userInput.value = '';
 }
 </script>
 
 <template>
   <main>
-    <img src="/logo2.svg" alt="DFINITY logo" />
-    <br />
-    <br />
-    <form action="#" @submit="handleSubmit">
-      <label for="name">Enter your name: &nbsp;</label>
-      <input id="name" alt="Name" type="text" />
-      <button type="submit">Click Me!</button>
-    </form>
-    <section id="greeting">{{ greeting }}</section>
+    <div v-for="msg in messages" :key="msg.content" :class="msg.role">
+      <strong>{{ msg.role }}:</strong> {{ msg.content }}
+    </div>
+    <input v-model="userInput" @keyup.enter="sendMessage" placeholder="Napisz wiadomość..." />
+    <button @click="sendMessage">Wyślij</button>
+    <button @click="login">Zaloguj się przez Internet Identity</button>
   </main>
 </template>
