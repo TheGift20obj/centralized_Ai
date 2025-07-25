@@ -5,6 +5,11 @@ import App from './App.vue';
 import { AuthClient } from "@dfinity/auth-client";
 import { project_chatgpt_backend } from 'declarations/project_chatgpt_backend/index';
 
+export const loginStatus = {
+  loggedIn: false,
+  principal: null
+};
+
 export const login = async () => {
   const authClient = await AuthClient.create();
 
@@ -13,7 +18,8 @@ export const login = async () => {
     onSuccess: async () => {
       const identity = authClient.getIdentity();
       const principal = identity.getPrincipal().toText();
-      document.getElementById("output").innerText = "Zalogowany jako: " + principal;
+      loginStatus.loggedIn = true;
+      loginStatus.principal = principal;
     }
   });
 };

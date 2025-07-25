@@ -1,282 +1,122 @@
-use candid::CandidType;
+use ic_cdk::api::management_canister::http_request;
+use ic_cdk::api::management_canister::http_request::HttpMethod;
+use ic_cdk::api::management_canister::http_request::HttpResponse;
+use ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument;
+use ic_cdk::api::management_canister::http_request::HttpHeader;
+use candid::{Principal, CandidType, Nat};
+use std::collections::HashMap;
+use ic_cdk_macros::{update, query};
+use serde_json::json;
 use serde::{Deserialize, Serialize};
-use ic_cdk_macros::{init, query};
-use std::cell::RefCell;
-use ic_cdk::api::time;
+
+#[derive(Clone, CandidType, Deserialize)]
+struct ChatMessage {
+    question: String,
+    answer: String,
+}
 
 thread_local! {
-    // RNG state seeded from current time
-    static RNG_STATE: RefCell<u64> = RefCell::new(time());
+    static USER_CHATS: std::cell::RefCell<HashMap<Principal, Vec<ChatMessage>>> = std::cell::RefCell::new(HashMap::new());
 }
 
-/// Simple xorshift64* RNG for pseudo-random numbers
-fn pseudo_random() -> u64 {
-    RNG_STATE.with(|state| {
-        let mut s = *state.borrow();
-        // xorshift64* steps
-        s ^= s << 13;
-        s ^= s >> 7;
-        s ^= s << 17;
-        *state.borrow_mut() = s;
-        s
-    })
+#[derive(Serialize, Deserialize)]
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<Message>,
 }
 
-/// Get pseudo-random float in range [-1.0, 1.0]
-fn pseudo_random_float() -> f32 {
-    let rnd = pseudo_random();
-    let val = (rnd as f64 / u64::MAX as f64) * 2.0 - 1.0;
-    val as f32
+#[derive(Serialize, Deserialize)]
+struct Message {
+    role: String,
+    content: String,
 }
 
-/// Shuffle slice in-place using our RNG
-fn shuffle_dataset<T>(dataset: &mut [T]) {
-    let len = dataset.len();
-    for i in (1..len).rev() {
-        let j = (pseudo_random() as usize) % (i + 1);
-        dataset.swap(i, j);
-    }
+const CYCLES_FOR_HTTP_REQUEST: u128 = 12_000_000_000;
+
+pub struct HttpRequest {
+    pub url: String,
+    pub method: HttpMethod,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
 }
 
-#[derive(Clone, CandidType, Serialize, Deserialize, Debug)]
-pub struct Neuron {
-    pub weights: Vec<f32>,
-    pub bias: f32,
-    pub last_output: f32,
-}
+#[update]
+async fn chat(prompt: String) -> String {
+    let openai_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "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".to_string());
+    //second key: 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
+    let body = json!({
+        "model": "gpt-4o-mini",
+        "messages": [{
+            "role": "user",
+            "context": prompt,
+        }]
+    });
+    
+    let body_str = body.to_string();
 
-impl Neuron {
-    pub fn activate(&mut self, inputs: &[f32]) -> f32 {
-        let sum: f32 = self
-            .weights
-            .iter()
-            .zip(inputs.iter())
-            .map(|(w, i)| w * i)
-            .sum();
-        self.last_output = Self::sigmoid(sum + self.bias);
-        self.last_output
-    }
+    let request = CanisterHttpRequestArgument {
+        url: "https://api.openai.com/v1/chat/completions".to_string(),
+        method: HttpMethod::POST,
+        headers: vec![
+            HttpHeader {
+                name: "Authorization".to_string(),
+                value: format!("Bearer {}", openai_api_key),
+            },
+            HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/json".to_string(),
+            },
+        ],
+        body: Some(body_str.into_bytes()),
+        max_response_bytes: Some(1048576), // 1MB limit na odpowiedź
+        transform: None,
+    };
 
-    fn sigmoid(x: f32) -> f32 {
-        1.0 / (1.0 + (-x).exp())
-    }
+    match http_request::http_request(request, CYCLES_FOR_HTTP_REQUEST).await {
+        Ok((HttpResponse { status, body, .. },)) if status == Nat::from(200u16) => {
+            //return "Test".to_string();
+            let resp_str = String::from_utf8(body).unwrap_or_default();
+            // Parsujemy JSON OpenAI response aby zwrócić treść odpowiedzi:
+            #[derive(Deserialize)]
+            struct Choice {
+                message: Message,
+            }
+            #[derive(Deserialize)]
+            struct OpenAIResponse {
+                choices: Vec<Choice>,
+            }
 
-    fn sigmoid_derivative(output: f32) -> f32 {
-        output * (1.0 - output)
-    }
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, Debug)]
-pub struct Layer {
-    pub neurons: Vec<Neuron>,
-}
-
-impl Layer {
-    pub fn forward(&mut self, inputs: &[f32]) -> Vec<f32> {
-        self.neurons.iter_mut().map(|n| n.activate(inputs)).collect()
-    }
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, Debug)]
-pub struct NeuralNetwork {
-    pub layers: Vec<Layer>,
-}
-
-impl NeuralNetwork {
-    pub fn new(layer_sizes: &[usize]) -> Self {
-        let mut layers = Vec::new();
-
-        for w in layer_sizes.windows(2) {
-            let input_size = w[0];
-            let output_size = w[1];
-
-            let neurons = (0..output_size)
-                .map(|_| {
-                    let weights = (0..input_size)
-                        .map(|_| pseudo_random_float())
-                        .collect();
-                    let bias = pseudo_random_float();
-                    Neuron {
-                        weights,
-                        bias,
-                        last_output: 0.0,
+            match serde_json::from_str::<OpenAIResponse>(&resp_str) {
+                Ok(resp) => {
+                    if let Some(choice) = resp.choices.first() {
+                        choice.message.content.clone()
+                    } else {
+                        "No choices in response".to_string()
                     }
-                })
-                .collect();
-
-            layers.push(Layer { neurons });
-        }
-
-        Self { layers }
-    }
-
-    pub fn predict(&mut self, input: Vec<f32>) -> Vec<f32> {
-        self.layers.iter_mut().fold(input, |inp, layer| layer.forward(&inp))
-    }
-
-    pub fn train_on_example(&mut self, input: &[f32], target: &[f32]) {
-        if self.layers.is_empty() {
-            return;
-        }
-
-        // Forward pass
-        let mut activations = Vec::new();
-        let mut current_input = input.to_vec();
-        activations.push(current_input.clone());
-
-        for layer in self.layers.iter_mut() {
-            current_input = layer.forward(&current_input);
-            activations.push(current_input.clone());
-        }
-
-        // Backward pass (backpropagation)
-        let mut errors = Vec::new();
-        let output_activations = activations.last().unwrap();
-        errors.push(
-            output_activations
-                .iter()
-                .zip(target.iter())
-                .map(|(o, t)| t - o)
-                .collect::<Vec<f32>>(),
-        );
-
-        // Calculate errors for hidden layers
-        for l in (1..self.layers.len()).rev() {
-            let layer = &self.layers[l];
-            let prev_layer = &self.layers[l - 1];
-            let mut layer_errors = vec![0.0; prev_layer.neurons.len()];
-
-            for (i, neuron) in prev_layer.neurons.iter().enumerate() {
-                let mut error_sum = 0.0;
-                for (j, next_neuron) in layer.neurons.iter().enumerate() {
-                    error_sum += errors[0][j] * next_neuron.weights[i];
                 }
-                layer_errors[i] = error_sum;
-            }
-            errors.insert(0, layer_errors);
-        }
-
-        // Update weights and biases
-        let lr = 0.01;
-        for (l, layer) in self.layers.iter_mut().enumerate() {
-            let inputs = &activations[l];
-            for (n_idx, neuron) in layer.neurons.iter_mut().enumerate() {
-                let output = neuron.last_output;
-                let delta = errors[l][n_idx] * Neuron::sigmoid_derivative(output);
-                for (w_idx, w) in neuron.weights.iter_mut().enumerate() {
-                    *w += lr * delta * inputs[w_idx];
-                }
-                neuron.bias += lr * delta;
+                Err(e) => format!("JSON parse error: {}", e),
             }
         }
-    }
-
-    pub fn train_on_dataset(&mut self, dataset: &mut [(Vec<f32>, Vec<f32>)], epochs: usize) {
-        for _ in 0..epochs {
-            shuffle_dataset(dataset);
-            for (input, target) in dataset.iter() {
-                self.train_on_example(input, target);
-            }
+        Ok((HttpResponse { status, body, .. },)) => {
+            let error_body = String::from_utf8_lossy(&body);
+            format!("OpenAI error status: {}, body: {}", status, error_body)
         }
+        Err(e) => format!("HTTP request error: {:?}", e),
     }
 }
 
-// Example dialogs dataset
-static EXAMPLE_DIALOGS: &[(&str, &str)] = &[
-    ("Cześć", "Hej, jak mogę pomóc?"),
-    ("Jaki jest kolor nieba?", "Niebieski"),
-    ("Jak się masz?", "Dobrze, dziękuję!"),
-    ("Opowiedz mi o kwiatkach", "Kwiatki są piękne i różnorodne."),
-    ("Jaki jest twój nastrój?", "Czuję się świetnie!"),
-];
-
-// Encode string to input vector (normalized chars, max length 10)
-fn encode_input(s: &str) -> Vec<f32> {
-    let mut input: Vec<f32> = s
-        .chars()
-        .take(10)
-        .map(|c| (c as u8 as f32) / 255.0)
-        .collect();
-    while input.len() < 10 {
-        input.push(0.0);
-    }
-    input
-}
-
-// Encode string to target vector (normalized chars, max length 83)
-fn encode_target(s: &str) -> Vec<f32> {
-    let mut target: Vec<f32> = s
-        .chars()
-        .take(83)
-        .map(|c| (c as u8 as f32) / 255.0)
-        .collect();
-    while target.len() < 83 {
-        target.push(0.0);
-    }
-    target
-}
-
-thread_local! {
-    static AI_BRAIN: RefCell<NeuralNetwork> = RefCell::new(NeuralNetwork::new(&[10, 750, 2500, 5000, 1250, 83]));
-}
-
-#[init]
-fn init() {
-    AI_BRAIN.with(|brain| {
-        *brain.borrow_mut() = NeuralNetwork::new(&[10, 750, 2500, 5000, 1250, 83]);
-
-        let mut net = brain.borrow_mut();
-
-        let mut dataset: Vec<(Vec<f32>, Vec<f32>)> = EXAMPLE_DIALOGS
-            .iter()
-            .map(|(inp, tgt)| (encode_input(inp), encode_target(tgt)))
-            .collect();
-
-        net.train_on_dataset(&mut dataset, 10);
+#[update]
+fn add_chat_message(user: Principal, question: String, answer: String) {
+    USER_CHATS.with(|chats| {
+        let mut chats = chats.borrow_mut();
+        let entry = chats.entry(user).or_insert_with(Vec::new);
+        entry.push(ChatMessage { question, answer });
     });
 }
 
 #[query]
-fn chat(message: String) -> String {
-    let input = encode_input(&message);
-
-    let output = AI_BRAIN.with(|brain| {
-        let mut net = brain.borrow_mut();
-
-        // Predict
-        let prediction = net.predict(input.clone());
-
-        // Optional: online training to adapt to new input slightly
-        let target: Vec<f32> = prediction.iter().map(|v| (*v + 0.1).min(1.0)).collect();
-        net.train_on_example(&input, &target);
-
-        prediction
-    });
-
-    // Predefined responses
-    let responses = [
-        "Cześć", "Hej", "Witaj", "Dzień dobry", "Witam", "Halo", "Siema", "Czołem", "Hejka", "Yo",
-        "Serdecznie witam", "Miło cię widzieć", "Czołem przyjacielu", "No hej", "Witaj ponownie",
-        "Elo", "Siemka", "Pozdrowienia", "Cześć, jak mogę pomóc?", "W czym mogę pomóc?",
-        "Jaki jest problem?", "Co chcesz wiedzieć?", "Zapraszam do rozmowy",
-    ];
-
-    let mut best_response = "";
-    let mut best_score = 0f32;
-
-    for resp in responses.iter() {
-        let encoded_resp = encode_target(resp);
-        let score: f32 = encoded_resp
-            .iter()
-            .zip(output.iter())
-            .map(|(a, b)| 1.0 - (a - b).abs())
-            .sum();
-
-        if score > best_score {
-            best_score = score;
-            best_response = resp;
-        }
-    }
-
-    best_response.to_string()
+fn get_chat_history(user: Principal) -> Vec<ChatMessage> {
+    USER_CHATS.with(|chats| {
+        chats.borrow().get(&user).cloned().unwrap_or_default()
+    })
 }
