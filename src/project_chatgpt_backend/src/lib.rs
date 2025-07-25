@@ -9,16 +9,30 @@ use ic_cdk_macros::{update, query};
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, CandidType, Deserialize, Serialize)]
+struct ChatMeta {
+    id: ChatId,
+    name: String,
+}
+
 #[derive(Clone, CandidType, Deserialize)]
 struct ChatMessage {
     question: String,
     answer: String,
 }
 
-thread_local! {
-    static USER_CHATS: std::cell::RefCell<HashMap<Principal, Vec<ChatMessage>>> = std::cell::RefCell::new(HashMap::new());
+#[derive(Clone, CandidType, Deserialize)]
+struct ChatInfo {
+    name: String,
+    messages: Vec<ChatMessage>,
 }
 
+type ChatId = String;
+
+thread_local! {
+    static USER_CHATS: std::cell::RefCell<HashMap<Principal, HashMap<ChatId, ChatInfo>>> = std::cell::RefCell::new(HashMap::new());
+    static USER_NAMES: std::cell::RefCell<HashMap<Principal, String>> = std::cell::RefCell::new(HashMap::new());
+}
 #[derive(Serialize, Deserialize)]
 struct OpenAIRequest {
     model: String,
@@ -48,7 +62,7 @@ async fn chat(prompt: String) -> String {
         "model": "gpt-4o-mini",
         "messages": [{
             "role": "user",
-            "context": prompt,
+            "content": prompt,
         }]
     });
     
@@ -106,17 +120,95 @@ async fn chat(prompt: String) -> String {
 }
 
 #[update]
-fn add_chat_message(user: Principal, question: String, answer: String) {
-    USER_CHATS.with(|chats| {
-        let mut chats = chats.borrow_mut();
-        let entry = chats.entry(user).or_insert_with(Vec::new);
-        entry.push(ChatMessage { question, answer });
+fn create_new_chat(user: Principal, chat_id: ChatId, name: String) {
+    USER_CHATS.with(|user_chats| {
+        let mut user_chats = user_chats.borrow_mut();
+        let chats = user_chats.entry(user).or_insert_with(HashMap::new);
+        chats.entry(chat_id).or_insert(ChatInfo {
+            name,
+            messages: Vec::new(),
+        });
+    });
+}
+
+#[update]
+fn add_chat_message(user: Principal, chat_id: ChatId, question: String, answer: String) {
+    USER_CHATS.with(|user_chats| {
+        let mut user_chats = user_chats.borrow_mut();
+        if let Some(chats) = user_chats.get_mut(&user) {
+            if let Some(chat_info) = chats.get_mut(&chat_id) {
+                chat_info.messages.push(ChatMessage { question, answer });
+            }
+        }
     });
 }
 
 #[query]
-fn get_chat_history(user: Principal) -> Vec<ChatMessage> {
-    USER_CHATS.with(|chats| {
-        chats.borrow().get(&user).cloned().unwrap_or_default()
+fn get_chat_history(user: Principal, chat_id: ChatId) -> ChatInfo {
+    USER_CHATS.with(|user_chats| {
+        user_chats.borrow()
+            .get(&user)
+            .and_then(|chats| chats.get(&chat_id))
+            .cloned()
+    }).expect("REASON")
+}
+
+#[update]
+fn delete_chat(user: Principal, chat_id: ChatId) -> bool {
+    USER_CHATS.with(|user_chats| {
+        let mut user_chats = user_chats.borrow_mut();
+        if let Some(chats) = user_chats.get_mut(&user) {
+            return chats.remove(&chat_id).is_some();
+        }
+        false
+    })
+}
+
+#[update]
+fn rename_chat(user: Principal, chat_id: ChatId, new_name: String) -> bool {
+    USER_CHATS.with(|user_chats| {
+        let mut user_chats = user_chats.borrow_mut();
+        if let Some(chats) = user_chats.get_mut(&user) {
+            if let Some(chat_info) = chats.get_mut(&chat_id) {
+                chat_info.name = new_name;
+                return true;
+            }
+        }
+        false
+    })
+}
+
+#[query]
+fn list_chats(user: Principal) -> Vec<ChatMeta> {
+    USER_CHATS.with(|user_chats| {
+        user_chats.borrow()
+            .get(&user)
+            .map(|chats| {
+                chats.iter()
+                    .map(|(chat_id, info)| ChatMeta {
+                        id: chat_id.clone(),
+                        name: info.name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+#[update]
+fn set_user_name(user: Principal, name: String) {
+    USER_NAMES.with(|names| {
+        names.borrow_mut().insert(user, name);
+    });
+}
+
+#[query]
+fn get_user_name(user: Principal) -> String {
+    USER_NAMES.with(|names| {
+        names
+            .borrow()
+            .get(&user)
+            .cloned()
+            .unwrap_or_else(|| "user".to_string())
     })
 }
