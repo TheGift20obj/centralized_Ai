@@ -8,6 +8,10 @@ use std::collections::HashMap;
 use ic_cdk_macros::{update, query};
 use serde_json::json;
 use serde::{Deserialize, Serialize};
+use ic_cdk::api::time;
+
+const PROMPT_LIMIT: u32 = 50;
+const BLOCK_TIME_NANOS: u64 = 12 * 60 * 60 * 1_000_000_000;
 
 #[derive(Clone, CandidType, Deserialize, Serialize)]
 struct ChatMeta {
@@ -32,6 +36,7 @@ type ChatId = String;
 thread_local! {
     static USER_CHATS: std::cell::RefCell<HashMap<Principal, HashMap<ChatId, ChatInfo>>> = std::cell::RefCell::new(HashMap::new());
     static USER_NAMES: std::cell::RefCell<HashMap<Principal, String>> = std::cell::RefCell::new(HashMap::new());
+    static USER_PROMPTS: std::cell::RefCell<HashMap<Principal, (u32, Option<u64>)>> = std::cell::RefCell::new(HashMap::new());
 }
 #[derive(Serialize, Deserialize)]
 struct OpenAIRequest {
@@ -210,5 +215,35 @@ fn get_user_name(user: Principal) -> String {
             .get(&user)
             .cloned()
             .unwrap_or_else(|| "user".to_string())
+    })
+}
+
+#[update]
+pub fn try_increment_user_prompt(user: Principal) -> bool {
+    let now = time();
+
+    USER_PROMPTS.with(|map| {
+        let mut map = map.borrow_mut();
+        let entry = map.entry(user).or_insert((0, None));
+
+        let (count, blocked_since) = entry;
+
+        if let Some(block_time) = blocked_since {
+            if now - *block_time >= BLOCK_TIME_NANOS {
+                *count = 1;
+                *blocked_since = None;
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            *count += 1;
+
+            if *count >= PROMPT_LIMIT {
+                *blocked_since = Some(now);
+            }
+
+            return true;
+        }
     })
 }

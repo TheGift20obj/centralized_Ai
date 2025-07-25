@@ -11,6 +11,7 @@ type ChatInfo = record {
 }
 
 service : {
+    try_increment_user_prompt: (principal) -> (bool);
     get_user_name: (principal) -> (text) query;
     set_user_name: (principal, text) -> ();
     create_new_chat: (principal, ChatId, text) -> ();

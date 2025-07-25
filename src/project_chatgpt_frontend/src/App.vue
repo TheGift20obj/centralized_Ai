@@ -12,6 +12,7 @@ import {
   renameChat,
   setUserName,
   getUserName,
+  tryPrompt,
 } from './main.js';
 
 const messages = ref([]);
@@ -26,6 +27,7 @@ const currentChatName = ref('');
 
 const showUsernameModal = ref(false);
 const tempUsername = ref('');
+const showMenu = ref(null);
 
 const loadChats = async () => {
   if (!loginStatus.loggedIn) return;
@@ -63,27 +65,32 @@ const createChat = async () => {
 
 const sendMessage = async () => {
   if (!userInput.value.trim() || !currentChatId.value) return;
+  const canDo = await tryPrompt(loginStatus.principal);
+  if (canDo) {
+    const userMsg = { role: 'user', content: userInput.value };
+    messages.value.push(userMsg);
 
-  const userMsg = { role: 'user', content: userInput.value };
-  messages.value.push(userMsg);
+    try {
+      const reply = await chatWithBackend(userInput.value);
+      messages.value.push({ role: 'ai', content: reply });
 
-  try {
-    const reply = await chatWithBackend(userInput.value);
-    messages.value.push({ role: 'ai', content: reply });
+      await addChatMessage(
+        loginStatus.principal,
+        currentChatId.value,
+        userInput.value,
+        reply
+      );
+    } catch (error) {
+      messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message });
+    }
 
-    await addChatMessage(
-      loginStatus.principal,
-      currentChatId.value,
-      userInput.value,
-      reply
-    );
-  } catch (error) {
-    messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message });
+    userInput.value = '';
+    await nextTick();
+    scrollToBottom();
+  } else {
+    alert("Daily limit reached. Come back tomorrow!");
+    return;
   }
-
-  userInput.value = '';
-  await nextTick();
-  scrollToBottom();
 };
 
 const scrollToBottom = () => {
@@ -122,6 +129,7 @@ onMounted(async () => {
 <template>
   <div class="app-wrapper">
     <!-- Sidebar -->
+    <!-- Sidebar -->
     <div class="sidebar" :class="{ open: showSidebar }">
       <div class="sidebar-toggle" @click="showSidebar = !showSidebar">
         <span>{{ showSidebar ? '<' : '>' }}</span>
@@ -135,9 +143,16 @@ onMounted(async () => {
             :key="chat.id"
             :class="{ active: chat.id === currentChatId }"
           >
-            <span @click="openChat(chat.id, chat.name)">{{ chat.name }}</span>
-            <button @click="() => renameChatPrompt(chat.id, chat.name)">✏️</button>
-            <button @click="() => removeChat(chat.id)">🗑️</button>
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: center">
+              <span @click="openChat(chat.id, chat.name)">{{ chat.name }}</span>
+              <div style="position: relative;">
+                <button @click="showMenu = showMenu === chat.id ? null : chat.id">⋮</button>
+                <div v-if="showMenu === chat.id" style="position: absolute; right: 0; background: white; color: black; border: 1px solid #ccc; padding: 4px; border-radius: 4px; z-index: 1;">
+                  <button @click="() => renameChatPrompt(chat.id, chat.name)">✏️ Rename</button><br />
+                  <button @click="() => removeChat(chat.id)">🗑️ Delete</button>
+                </div>
+              </div>
+            </div>
           </li>
         </ul>
       </div>

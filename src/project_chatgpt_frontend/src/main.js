@@ -65,4 +65,7 @@ export async function getUserName(principal) {
   return await project_chatgpt_backend.get_user_name(principal);
 }
 
+export async function tryPrompt(principal) {
+  return await project_chatgpt_backend.try_increment_user_prompt(principal);
+}
 createApp(App).use(createPinia()).mount('#app');
