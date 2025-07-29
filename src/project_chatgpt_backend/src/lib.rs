@@ -61,7 +61,7 @@ pub struct HttpRequest {
 
 #[update]
 async fn chat(prompt: String) -> String {
-    let openai_api_key = "secret-key";
+    let openai_api_key = "YOUR_OPENAI_API_KEY";
     let body = json!({
         "model": "gpt-4o-mini",
         "messages": [{
@@ -92,7 +92,6 @@ async fn chat(prompt: String) -> String {
 
     match http_request::http_request(request, CYCLES_FOR_HTTP_REQUEST).await {
         Ok((HttpResponse { status, body, .. },)) if status == Nat::from(200u16) => {
-            //return "Test".to_string();
             let resp_str = String::from_utf8(body).unwrap_or_default();
             // Parsujemy JSON OpenAI response aby zwrócić treść odpowiedzi:
             #[derive(Deserialize)]
