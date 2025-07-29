@@ -27,7 +27,7 @@ export const loginStatus = {
 
 export const login = async () => {
   /*loginStatus.loggedIn = true;
-  loginStatus.principal = Principal.fromText("aaaaa-aa");   -- Test
+  loginStatus.principal = Principal.fromText("aaaaa-aa");
   loginStatus.username = await getUserName(loginStatus.principal);
   const authClient = await AuthClient.create();*/
 

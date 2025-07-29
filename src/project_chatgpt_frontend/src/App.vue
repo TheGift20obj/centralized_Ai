@@ -16,6 +16,24 @@ import {
   getRandomUserMessages,
 } from './main.js';
 
+const formatMarkdown = (text) => {
+  let formatted = text;
+  formatted = formatted.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  formatted = formatted.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+  formatted = formatted.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+  formatted = formatted.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  formatted = formatted.replace(/^\d+\.\s+(.*)/gm, '<li>$1</li>');
+  formatted = formatted.replace(/(<li>.*<\/li>)/gs, '<ol>$1</ol>');
+  formatted = formatted.replace(/^- (.*)/gm, '<li>$1</li>');
+  formatted = formatted.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  formatted = formatted.replace(/\n{2,}/g, '</p><p>');
+  formatted = `<p>${formatted}</p>`;
+
+  return formatted;
+};
+
 const messages = ref([]);
 const userInput = ref('');
 const isLoggedIn = ref(false);
@@ -180,7 +198,7 @@ onMounted(async () => {
         >
           <template v-if="msg.role === 'ai'">
             <span class="message-role">AI:</span>
-            <span class="message-content">{{ msg.content }}</span>
+            <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
           </template>
           <template v-else>
             <span class="message-content">{{ msg.content }}</span>
@@ -371,6 +389,7 @@ onMounted(async () => {
   font-weight: bold;
   margin: 0 5px;
   color: #555;
+  align-self: flex-start;
 }
 
 .input-container {
@@ -428,5 +447,39 @@ onMounted(async () => {
   font-size: 0.9rem;
   color: green;
   font-weight: bold;
+}
+.message-content pre {
+  background: #f6f8fa;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: monospace;
+  white-space: pre-wrap;
+}
+
+.message-content h1, h2, h3 {
+  margin: 0.5em 0 0.3em;
+  font-weight: bold;
+}
+
+.message-content ul, .message-content ol {
+  padding-left: 1.5em;
+  margin: 0.3em 0;
+}
+
+.message-content li {
+  margin-bottom: 0.3em;
+}
+
+.message-content strong {
+  font-weight: bold;
+}
+
+.message-content em {
+  font-style: italic;
+}
+
+.message-content p {
+  margin: 0.4em 0;
 }
 </style>

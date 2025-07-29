@@ -61,7 +61,7 @@ pub struct HttpRequest {
 
 #[update]
 async fn chat(prompt: String) -> String {
-    let openai_api_key = "YOUR_OPENAI_API_KEY";
+    let openai_api_key = "";
     let body = json!({
         "model": "gpt-4o-mini",
         "messages": [{
