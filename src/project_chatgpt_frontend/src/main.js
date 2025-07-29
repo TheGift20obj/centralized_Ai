@@ -28,8 +28,8 @@ export const loginStatus = {
 export const login = async () => {
   /*loginStatus.loggedIn = true;
   loginStatus.principal = Principal.fromText("aaaaa-aa");
-  loginStatus.username = await getUserName(loginStatus.principal);
-  const authClient = await AuthClient.create();*/
+  loginStatus.username = await getUserName(loginStatus.principal);*/
+  const authClient = await AuthClient.create();
 
   await authClient.login({
     identityProvider: "https://identity.ic0.app/#authorize",
