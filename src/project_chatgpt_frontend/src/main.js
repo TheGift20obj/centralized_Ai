@@ -35,7 +35,7 @@ export const login = async () => {
     identityProvider: "https://identity.ic0.app/#authorize",
     onSuccess: async () => {
       const identity = authClient.getIdentity();
-      const principal = identity.getPrincipal().toText();
+      const principal = identity.getPrincipal();
       loginStatus.loggedIn = true;
       loginStatus.principal = principal;
       loginStatus.username = await getUserName(loginStatus.principal);

@@ -87,7 +87,13 @@ async fn chat(prompt: String) -> String {
         ],
         body: Some(body_str.into_bytes()),
         max_response_bytes: Some(1048576), // 1MB limit na odpowiedź
-        transform: None,
+        transform: Some(http_request::TransformContext {
+            function: ic_cdk::api::management_canister::http_request::TransformFunc(candid::Func {
+                principal: ic_cdk::id(),
+                method: "transform".to_string(),
+            }),
+            context: vec![],
+        }),
     };
 
     match http_request::http_request(request, CYCLES_FOR_HTTP_REQUEST).await {
@@ -244,4 +250,14 @@ pub fn try_increment_user_prompt(user: Principal) -> bool {
             return true;
         }
     })
+}
+
+
+#[query]
+fn transform(raw: http_request::HttpResponse) -> http_request::HttpResponse {
+    http_request::HttpResponse {
+        status: raw.status,
+        headers: vec![],
+        body: raw.body,
+    }
 }
