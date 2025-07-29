@@ -38,6 +38,7 @@ export const login = async () => {
       const principal = identity.getPrincipal().toText();
       loginStatus.loggedIn = true;
       loginStatus.principal = principal;
+      loginStatus.username = await getUserName(loginStatus.principal);
     },
   });
 };
