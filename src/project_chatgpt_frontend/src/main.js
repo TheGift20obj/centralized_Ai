@@ -6,6 +6,19 @@ import { AuthClient } from "@dfinity/auth-client";
 import { project_chatgpt_backend } from 'declarations/project_chatgpt_backend/index';
 import { Principal } from "@dfinity/principal";
 
+const userStartMessages = [
+  "Cześć, możesz mi pomóc z zadaniem?",
+  "Jak działa blockchain?",
+  "Napisz mi maila z podziękowaniem.",
+  "Masz pomysł na prezent dla mamy?",
+  "Co oznacza sen o wodzie?",
+  "Jakie są nowinki ze świata technologii?",
+  "Potrzebuję przepis na szybki obiad.",
+  "Wyjaśnij mi, co to jest inflacja.",
+  "Napisz mi streszczenie tej książki.",
+  "Jak mogę poprawić swoje CV?",
+];
+
 export const loginStatus = {
   loggedIn: false,
   principal: null,
@@ -68,4 +81,10 @@ export async function getUserName(principal) {
 export async function tryPrompt(principal) {
   return await project_chatgpt_backend.try_increment_user_prompt(principal);
 }
+
+export function getRandomUserMessages() {
+  const shuffled = [...userStartMessages].sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, 3);
+}
+
 createApp(App).use(createPinia()).mount('#app');

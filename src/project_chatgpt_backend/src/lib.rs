@@ -50,7 +50,7 @@ struct Message {
     content: String,
 }
 
-const CYCLES_FOR_HTTP_REQUEST: u128 = 12_000_000_000;
+const CYCLES_FOR_HTTP_REQUEST: u128 = 11_000_000_000;
 
 pub struct HttpRequest {
     pub url: String,
@@ -61,7 +61,7 @@ pub struct HttpRequest {
 
 #[update]
 async fn chat(prompt: String) -> String {
-    let openai_api_key = std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "NONE".to_string());
+    let openai_api_key = "secret-key";
     let body = json!({
         "model": "gpt-4o-mini",
         "messages": [{

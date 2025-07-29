@@ -13,6 +13,7 @@ import {
   setUserName,
   getUserName,
   tryPrompt,
+  getRandomUserMessages,
 } from './main.js';
 
 const messages = ref([]);
@@ -29,6 +30,12 @@ const showUsernameModal = ref(false);
 const tempUsername = ref('');
 const showMenu = ref(null);
 
+const suggestions = ref([]);
+
+const loadSuggestions = () => {
+  suggestions.value = getRandomUserMessages();
+};
+
 const loadChats = async () => {
   if (!loginStatus.loggedIn) return;
   const list = await listChats(loginStatus.principal);
@@ -41,18 +48,15 @@ const openChat = async (chatId, name) => {
   const result = await getChatHistory(loginStatus.principal, chatId);
   if (!result || !result.messages) {
     messages.value = [];
-    console.log("No");
     return;
   }
-  const chatName = result.name;
-  const chatMessages = result.messages;
-
-  messages.value = chatMessages.flatMap((m) => [
+  messages.value = result.messages.flatMap(m => [
     { role: 'user', content: m.question },
     { role: 'ai', content: m.answer },
   ]);
-  currentChatName.value = chatName;
+  currentChatName.value = result.name;
   nextTick(scrollToBottom);
+  loadSuggestions();
 };
 
 const createChat = async () => {
@@ -66,31 +70,36 @@ const createChat = async () => {
 const sendMessage = async () => {
   if (!userInput.value.trim() || !currentChatId.value) return;
   const canDo = await tryPrompt(loginStatus.principal);
-  if (canDo) {
-    const userMsg = { role: 'user', content: userInput.value };
-    messages.value.push(userMsg);
-
-    try {
-      const reply = await chatWithBackend(userInput.value);
-      messages.value.push({ role: 'ai', content: reply });
-
-      await addChatMessage(
-        loginStatus.principal,
-        currentChatId.value,
-        userInput.value,
-        reply
-      );
-    } catch (error) {
-      messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message });
-    }
-
-    userInput.value = '';
-    await nextTick();
-    scrollToBottom();
-  } else {
+  if (!canDo) {
     alert("Daily limit reached. Come back tomorrow!");
     return;
   }
+
+  const userMsg = { role: 'user', content: userInput.value };
+  messages.value.push(userMsg);
+
+  try {
+    const reply = await chatWithBackend(userInput.value);
+    messages.value.push({ role: 'ai', content: reply });
+    await addChatMessage(
+      loginStatus.principal,
+      currentChatId.value,
+      userInput.value,
+      reply
+    );
+  } catch (error) {
+    messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message });
+  }
+
+  userInput.value = '';
+  await nextTick();
+  scrollToBottom();
+  loadSuggestions();
+};
+
+const sendSuggestion = async (msg) => {
+  userInput.value = msg;
+  await sendMessage();
 };
 
 const scrollToBottom = () => {
@@ -121,6 +130,7 @@ onMounted(async () => {
       isLoggedIn.value = true;
       clearInterval(check);
       await loadChats();
+      loadSuggestions();
     }
   }, 300);
 });
@@ -128,7 +138,6 @@ onMounted(async () => {
 
 <template>
   <div class="app-wrapper">
-    <!-- Sidebar -->
     <!-- Sidebar -->
     <div class="sidebar" :class="{ open: showSidebar }">
       <div class="sidebar-toggle" @click="showSidebar = !showSidebar">
@@ -147,7 +156,10 @@ onMounted(async () => {
               <span @click="openChat(chat.id, chat.name)">{{ chat.name }}</span>
               <div style="position: relative;">
                 <button @click="showMenu = showMenu === chat.id ? null : chat.id">⋮</button>
-                <div v-if="showMenu === chat.id" style="position: absolute; right: 0; background: white; color: black; border: 1px solid #ccc; padding: 4px; border-radius: 4px; z-index: 1;">
+                <div
+                  v-if="showMenu === chat.id"
+                  style="position: absolute; right: 0; background: white; color: black; border: 1px solid #ccc; padding: 4px; border-radius: 4px; z-index: 1;"
+                >
                   <button @click="() => renameChatPrompt(chat.id, chat.name)">✏️ Rename</button><br />
                   <button @click="() => removeChat(chat.id)">🗑️ Delete</button>
                 </div>
@@ -178,6 +190,18 @@ onMounted(async () => {
         <div ref="endOfMessages" />
       </section>
 
+      <!-- Suggestions -->
+      <section v-if="suggestions.length && currentChatId" class="suggestions-container">
+        <button
+          v-for="(s, i) in suggestions"
+          :key="i"
+          class="suggestion-btn"
+          @click="sendSuggestion(s)"
+        >
+          {{ s }}
+        </button>
+      </section>
+
       <!-- Input and buttons -->
       <section class="input-container">
         <input
@@ -194,13 +218,16 @@ onMounted(async () => {
         </span>
       </section>
     </main>
+
     <!-- Modal for username change -->
     <div v-if="showUsernameModal" class="modal-overlay">
       <div class="modal-content">
         <h2>Change Username</h2>
         <input v-model="tempUsername" placeholder="Enter new name..." />
         <div class="modal-buttons">
-          <button @click="() => { loginStatus.username = tempUsername; showUsernameModal = false; setUserName(loginStatus.principal, loginStatus.username); }">Save</button>
+          <button
+            @click="() => { loginStatus.username = tempUsername; showUsernameModal = false; setUserName(loginStatus.principal, loginStatus.username); }"
+          >Save</button>
           <button @click="() => { showUsernameModal = false }">Cancel</button>
         </div>
       </div>
@@ -340,16 +367,6 @@ onMounted(async () => {
   text-align: right;
 }
 
-.ai-avatar {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid #00d1b2;
-}
-
 .message-role {
   font-weight: bold;
   margin: 0 5px;
@@ -360,6 +377,27 @@ onMounted(async () => {
   display: flex;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.suggestions-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.suggestion-btn {
+  padding: 0.4rem 0.8rem;
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.suggestion-btn:hover {
+  background-color: #e0e0e0;
 }
 
 .chat-input {
