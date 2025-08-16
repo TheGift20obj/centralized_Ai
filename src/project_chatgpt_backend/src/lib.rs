@@ -33,13 +33,6 @@ struct ChatInfo {
 
 type ChatId = String;
 
-#[derive(CandidType, Deserialize, Serialize, Clone)]
-struct Message_Stable {
-    sender: Principal,
-    text: String,
-    timestamp: u64,
-}
-
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -67,6 +60,41 @@ thread_local! {
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
         )
     );
+}
+
+fn inc_user_prompt_stable(user: Principal) -> bool {
+    let now = time();
+
+    USER_PROMPTS_STABLE.with(|map_cell| {
+        let mut map = map_cell.borrow_mut();
+
+        // pobierz aktualną wartość lub ustaw domyślną
+        let mut count = 0;
+        let mut blocked_since: Option<u64> = None;
+
+        if let Some((c, b)) = map.get(&user) {
+            count = c.clone();
+            blocked_since = b.clone();
+        }
+
+        // logika blokady
+        if let Some(block_time) = blocked_since {
+            if now - block_time >= BLOCK_TIME_NANOS {
+                // reset
+                map.insert(user, (1, None));
+                true
+            } else {
+                false
+            }
+        } else {
+            count += 1;
+            if count >= PROMPT_LIMIT {
+                blocked_since = Some(now);
+            }
+            map.insert(user, (count, blocked_since));
+            true
+        }
+    })
 }
 
 fn set_name_stable(principal: Principal, value: String) {
@@ -211,48 +239,15 @@ fn list_chats(user: Principal) -> Vec<ChatMeta> {
 
 #[update]
 fn set_user_name(user: Principal, name: String) {
-    USER_NAMES.with(|names| {
-        names.borrow_mut().insert(user, name);
-    });
+    set_name_stable(user, name)
 }
 
 #[query]
 fn get_user_name(user: Principal) -> String {
-    USER_NAMES.with(|names| {
-        names
-            .borrow()
-            .get(&user)
-            .cloned()
-            .unwrap_or_else(|| "user".to_string())
-    })
+    get_name_stable(user).unwrap_or_else(|| "anonimus".to_string())
 }
 
 #[update]
 pub fn try_increment_user_prompt(user: Principal) -> bool {
-    let now = time();
-
-    USER_PROMPTS.with(|map| {
-        let mut map = map.borrow_mut();
-        let entry = map.entry(user).or_insert((0, None));
-
-        let (count, blocked_since) = entry;
-
-        if let Some(block_time) = blocked_since {
-            if now - *block_time >= BLOCK_TIME_NANOS {
-                *count = 1;
-                *blocked_since = None;
-                return true;
-            } else {
-                return false;
-            }
-        } else {
-            *count += 1;
-
-            if *count >= PROMPT_LIMIT {
-                *blocked_since = Some(now);
-            }
-
-            return true;
-        }
-    })
+    inc_user_prompt_stable(user)
 }
