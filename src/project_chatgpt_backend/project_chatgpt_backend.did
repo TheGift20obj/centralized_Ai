@@ -1,7 +1,7 @@
 type ChatMessage = record {
-  role: text,
-  content: text,
-  timestamp: nat64,
+  role: text;
+  content: text;
+  timestamp: nat64;
 };
 
 type ChatId = text;
@@ -10,23 +10,11 @@ type ChatInfo = record {
   messages: vec ChatMessage;
 };
 
-type TransformRequest = record {
-    status: nat;
-    headers: vec record { name: text; value: text };
-    body: vec nat8;
-};
-
-type TransformResponse = record {
-    status: nat;
-    headers: vec record { name: text; value: text };
-    body: vec nat8;
-};
-
 service : {
     try_increment_user_prompt: (principal) -> (bool);
     get_user_name: (principal) -> (text) query;
     set_user_name: (principal, text) -> ();
-    create_new_chat: (principal, text) -> ();
+    create_new_chat: (principal, nat64, text) -> ();
     add_chat_message: (principal, nat64, text, text) -> ();
     get_chat_history: (principal, nat64) -> (ChatInfo) query;
     delete_chat: (principal, nat64) -> (bool);

@@ -227,8 +227,7 @@ async fn chat(prompt: String) -> String {
 }
 
 #[update]
-fn create_new_chat(user: Principal, name: String) {
-    let uid = time();
+fn create_new_chat(user: Principal, uid: u64, name: String) {
     create_new_chat_stable(user, uid, name);
 }
 
