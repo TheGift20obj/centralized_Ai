@@ -8,7 +8,19 @@ type ChatId = text;
 type ChatInfo = record {
   name: text;
   messages: vec ChatMessage;
-}
+};
+
+type TransformRequest = record {
+    status: nat;
+    headers: vec record { name: text; value: text };
+    body: vec nat8;
+};
+
+type TransformResponse = record {
+    status: nat;
+    headers: vec record { name: text; value: text };
+    body: vec nat8;
+};
 
 service : {
     try_increment_user_prompt: (principal) -> (bool);
@@ -21,13 +33,4 @@ service : {
     rename_chat: (principal, ChatId, text) -> (bool);
     list_chats: (principal) -> (vec record { id: ChatId; name: text }) query;
     "chat": (text) -> (text);
-    transform: (record {
-    status: nat;
-    headers: vec record { name: text; value: text };
-    body: vec nat8;
-  }) -> (record {
-    status: nat;
-    headers: vec record { name: text; value: text };
-    body: vec nat8;
-  }) query;
 }

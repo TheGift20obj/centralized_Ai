@@ -1,14 +1,14 @@
-use ic_cdk::api::management_canister::http_request;
-use ic_cdk::api::management_canister::http_request::HttpMethod;
-use ic_cdk::api::management_canister::http_request::HttpResponse;
-use ic_cdk::api::management_canister::http_request::CanisterHttpRequestArgument;
-use ic_cdk::api::management_canister::http_request::HttpHeader;
-use candid::{Principal, CandidType, Nat};
+use candid::{Principal, CandidType};
 use std::collections::HashMap;
 use ic_cdk_macros::{update, query};
-use serde_json::json;
 use serde::{Deserialize, Serialize};
 use ic_cdk::api::time;
+use ic_llm::Model;
+use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
+use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap};
+use std::cell::RefCell;
+
+type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 const PROMPT_LIMIT: u32 = 50;
 const BLOCK_TIME_NANOS: u64 = 12 * 60 * 60 * 1_000_000_000;
@@ -33,6 +33,83 @@ struct ChatInfo {
 
 type ChatId = String;
 
+#[derive(CandidType, Deserialize, Serialize, Clone)]
+struct Message_Stable {
+    sender: Principal,
+    text: String,
+    timestamp: u64,
+}
+
+thread_local! {
+    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+
+    static USER_NAMES_STABLE: RefCell<StableBTreeMap<Principal, String, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0)))
+        )
+    );
+
+    static USER_PROMPTS_STABLE: RefCell<StableBTreeMap<Principal, (u32, Option<u64>), Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1)))
+        )
+    );
+
+    static USER_CHATS_STABLE: RefCell<StableBTreeMap<(Principal, u32), (String, u32), Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2)))
+        )
+    );
+
+    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, u32), u32), (String, u64), Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
+        )
+    );
+}
+
+fn set_name_stable(principal: Principal, value: String) {
+    USER_NAMES_STABLE.with(|map| map.borrow_mut().insert(principal, value));
+}
+
+fn get_name_stable(principal: Principal) -> Option<String> {
+    USER_NAMES_STABLE.with(|map| map.borrow().get(&principal))
+}
+
+fn get_chats_for_user(user: Principal) -> Vec<(String, u32)> {
+    USER_CHATS_STABLE.with(|map_ref| {
+        let map = map_ref.borrow();
+        map.iter()
+            .filter_map(|entry| {
+                let (p, _index) = entry.key();
+                let (name, msg_count) = entry.value();
+                if *p == user {
+                    Some((name.clone(), msg_count.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
+fn get_msgs_for_user(user: Principal, chat_id: u32, msg_count: u32) -> Vec<(String, u64)> {
+    CHAT_MESSAGES_STABLE.with(|map_ref| {
+        let map = map_ref.borrow();
+        let mut messages = Vec::new();
+
+        for i in 0..msg_count {
+            let key = ((user, chat_id), i);
+            if let Some((content, timestamp)) = map.get(&key) {
+                messages.push((content.clone(), timestamp.clone()));
+            }
+        }
+
+        messages
+    })
+}
+
 thread_local! {
     static USER_CHATS: std::cell::RefCell<HashMap<Principal, HashMap<ChatId, ChatInfo>>> = std::cell::RefCell::new(HashMap::new());
     static USER_NAMES: std::cell::RefCell<HashMap<Principal, String>> = std::cell::RefCell::new(HashMap::new());
@@ -50,82 +127,10 @@ struct Message {
     content: String,
 }
 
-const CYCLES_FOR_HTTP_REQUEST: u128 = 11_000_000_000;
-
-pub struct HttpRequest {
-    pub url: String,
-    pub method: HttpMethod,
-    pub headers: Vec<(String, String)>,
-    pub body: Option<Vec<u8>>,
-}
 
 #[update]
 async fn chat(prompt: String) -> String {
-    let openai_api_key = "";
-    let body = json!({
-        "model": "gpt-4o-mini",
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-        }]
-    });
-    
-    let body_str = body.to_string();
-
-    let request = CanisterHttpRequestArgument {
-        url: "https://api.openai.com/v1/chat/completions".to_string(),
-        method: HttpMethod::POST,
-        headers: vec![
-            HttpHeader {
-                name: "Authorization".to_string(),
-                value: format!("Bearer {}", openai_api_key),
-            },
-            HttpHeader {
-                name: "Content-Type".to_string(),
-                value: "application/json".to_string(),
-            },
-        ],
-        body: Some(body_str.into_bytes()),
-        max_response_bytes: Some(1048576), // 1MB limit na odpowiedź
-        transform: Some(http_request::TransformContext {
-            function: ic_cdk::api::management_canister::http_request::TransformFunc(candid::Func {
-                principal: ic_cdk::id(),
-                method: "transform".to_string(),
-            }),
-            context: vec![],
-        }),
-    };
-
-    match http_request::http_request(request, CYCLES_FOR_HTTP_REQUEST).await {
-        Ok((HttpResponse { status, body, .. },)) if status == Nat::from(200u16) => {
-            let resp_str = String::from_utf8(body).unwrap_or_default();
-            // Parsujemy JSON OpenAI response aby zwrócić treść odpowiedzi:
-            #[derive(Deserialize)]
-            struct Choice {
-                message: Message,
-            }
-            #[derive(Deserialize)]
-            struct OpenAIResponse {
-                choices: Vec<Choice>,
-            }
-
-            match serde_json::from_str::<OpenAIResponse>(&resp_str) {
-                Ok(resp) => {
-                    if let Some(choice) = resp.choices.first() {
-                        choice.message.content.clone()
-                    } else {
-                        "No choices in response".to_string()
-                    }
-                }
-                Err(e) => format!("JSON parse error: {}", e),
-            }
-        }
-        Ok((HttpResponse { status, body, .. },)) => {
-            let error_body = String::from_utf8_lossy(&body);
-            format!("OpenAI error status: {}, body: {}", status, error_body)
-        }
-        Err(e) => format!("HTTP request error: {:?}", e),
-    }
+    ic_llm::prompt(Model::Llama3_1_8B, prompt).await
 }
 
 #[update]
@@ -250,14 +255,4 @@ pub fn try_increment_user_prompt(user: Principal) -> bool {
             return true;
         }
     })
-}
-
-
-#[query]
-fn transform(raw: http_request::HttpResponse) -> http_request::HttpResponse {
-    http_request::HttpResponse {
-        status: raw.status,
-        headers: vec![],
-        body: raw.body,
-    }
 }

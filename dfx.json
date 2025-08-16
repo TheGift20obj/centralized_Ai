@@ -24,7 +24,10 @@
   },
   "dfx": "0.28.0",
   "networks": {
-    "ic": {},
+    "ic": {
+      "providers": ["https://ic0.app"],
+      "type": "persistent"
+    },
     "local": {
       "bind": "127.0.0.1:8000"
     }

@@ -7,16 +7,16 @@ import { project_chatgpt_backend } from 'declarations/project_chatgpt_backend/in
 import { Principal } from "@dfinity/principal";
 
 const userStartMessages = [
-  "Cześć, możesz mi pomóc z zadaniem?",
-  "Jak działa blockchain?",
-  "Napisz mi maila z podziękowaniem.",
-  "Masz pomysł na prezent dla mamy?",
-  "Co oznacza sen o wodzie?",
-  "Jakie są nowinki ze świata technologii?",
-  "Potrzebuję przepis na szybki obiad.",
-  "Wyjaśnij mi, co to jest inflacja.",
-  "Napisz mi streszczenie tej książki.",
-  "Jak mogę poprawić swoje CV?",
+  "Hi, can you help me with a task?",
+  "How does blockchain work?",
+  "Write me a thank-you email.",
+  "Do you have a gift idea for my mom?",
+  "What does a dream about water mean?",
+  "What are the latest tech news?",
+  "I need a recipe for a quick dinner.",
+  "Explain to me what inflation is.",
+  "Write me a summary of this book.",
+  "How can I improve my CV?",
 ];
 
 export const loginStatus = {
@@ -26,9 +26,6 @@ export const loginStatus = {
 };
 
 export const login = async () => {
-  /*loginStatus.loggedIn = true;
-  loginStatus.principal = Principal.fromText("aaaaa-aa");
-  loginStatus.username = await getUserName(loginStatus.principal);*/
   const authClient = await AuthClient.create();
 
   await authClient.login({
