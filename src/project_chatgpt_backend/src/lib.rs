@@ -15,19 +15,20 @@ const BLOCK_TIME_NANOS: u64 = 12 * 60 * 60 * 1_000_000_000;
 
 #[derive(Clone, CandidType, Deserialize, Serialize)]
 struct ChatMeta {
-    id: ChatId,
     name: String,
+    id: u64,
+    msg_len: u32,
 }
 
 #[derive(Clone, CandidType, Deserialize)]
 struct ChatMessage {
-    question: String,
-    answer: String,
+    role: String,
+    content: String,
+    timestamp: u64,
 }
 
 #[derive(Clone, CandidType, Deserialize)]
 struct ChatInfo {
-    name: String,
     messages: Vec<ChatMessage>,
 }
 
@@ -49,13 +50,13 @@ thread_local! {
         )
     );
 
-    static USER_CHATS_STABLE: RefCell<StableBTreeMap<(Principal, u32), (String, u32), Memory>> = RefCell::new(
+    static USER_CHATS_STABLE: RefCell<StableBTreeMap<(Principal, u64), (String, u32), Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(2)))
         )
     );
 
-    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, u32), u32), (String, u64), Memory>> = RefCell::new(
+    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, u64), u32), (String, String, u64), Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
         )
@@ -105,15 +106,15 @@ fn get_name_stable(principal: Principal) -> Option<String> {
     USER_NAMES_STABLE.with(|map| map.borrow().get(&principal))
 }
 
-fn get_chats_for_user(user: Principal) -> Vec<(String, u32)> {
+fn get_chats_for_user(user: Principal) -> Vec<ChatMeta> {
     USER_CHATS_STABLE.with(|map_ref| {
         let map = map_ref.borrow();
         map.iter()
             .filter_map(|entry| {
-                let (p, _index) = entry.key();
+                let (p, index) = entry.key();
                 let (name, msg_count) = entry.value();
                 if *p == user {
-                    Some((name.clone(), msg_count.clone()))
+                    Some(ChatMeta {name, id: *index, msg_len: msg_count })
                 } else {
                     None
                 }
@@ -122,19 +123,83 @@ fn get_chats_for_user(user: Principal) -> Vec<(String, u32)> {
     })
 }
 
-fn get_msgs_for_user(user: Principal, chat_id: u32, msg_count: u32) -> Vec<(String, u64)> {
+fn get_msgs_for_user(user: Principal, chat_id: u64, msg_count: u32) -> ChatInfo {
     CHAT_MESSAGES_STABLE.with(|map_ref| {
         let map = map_ref.borrow();
-        let mut messages = Vec::new();
+        let mut info = ChatInfo { messages: Vec::new() };
 
         for i in 0..msg_count {
             let key = ((user, chat_id), i);
-            if let Some((content, timestamp)) = map.get(&key) {
-                messages.push((content.clone(), timestamp.clone()));
+            if let Some((role, content, timestamp)) = map.get(&key) {
+                info.messages.push(ChatMessage { role, content, timestamp });
             }
         }
 
-        messages
+        info
+    })
+}
+
+fn create_new_chat_stable(user: Principal, chat_id: u64, name: String) {
+    USER_CHATS_STABLE.with(|map| {
+        map.borrow_mut().insert((user, chat_id), (name, 0));
+    });
+}
+
+fn delete_chat_stable(user: Principal, chat_id: u64) -> bool {
+    let removed = USER_CHATS_STABLE.with(|map| map.borrow_mut().remove(&(user, chat_id)));
+    if removed.is_some() {
+        CHAT_MESSAGES_STABLE.with(|map| {
+            let mut map = map.borrow_mut();
+            let keys_to_remove: Vec<_> = map
+                .iter()
+                .filter_map(|entry| {
+                    let ((p, c), idx) = entry.key();
+                    if *p == user && *c == chat_id {
+                        Some(((user, chat_id), *idx))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for key in keys_to_remove {
+                map.remove(&key);
+            }
+        });
+        true
+    } else {
+        false
+    }
+}
+
+fn rename_chat_stable(user: Principal, chat_id: u64, new_name: String) -> bool {
+    USER_CHATS_STABLE.with(|map| {
+        let mut map = map.borrow_mut();
+        if let Some((_old_name, msg_count)) = map.get(&(user, chat_id)) {
+            map.insert((user, chat_id), (new_name, msg_count));
+            true
+        } else {
+            false
+        }
+    })
+}
+
+fn add_chat_message_stable(user: Principal, chat_id: u64, content: String, role: String) -> bool {
+    let timestamp = time();
+    USER_CHATS_STABLE.with(|chat_map| {
+        let mut chat_map = chat_map.borrow_mut();
+        if let Some((name, msg_count)) = chat_map.get(&(user, chat_id)) {
+            let new_index = msg_count;
+            CHAT_MESSAGES_STABLE.with(|msg_map| {
+                msg_map
+                    .borrow_mut()
+                    .insert(((user, chat_id), new_index), (role, content, timestamp));
+            });
+            chat_map.insert((user, chat_id), (name.clone(), new_index + 1));
+            true
+        } else {
+            false
+        }
     })
 }
 
@@ -162,79 +227,34 @@ async fn chat(prompt: String) -> String {
 }
 
 #[update]
-fn create_new_chat(user: Principal, chat_id: ChatId, name: String) {
-    USER_CHATS.with(|user_chats| {
-        let mut user_chats = user_chats.borrow_mut();
-        let chats = user_chats.entry(user).or_insert_with(HashMap::new);
-        chats.entry(chat_id).or_insert(ChatInfo {
-            name,
-            messages: Vec::new(),
-        });
-    });
+fn create_new_chat(user: Principal, name: String) {
+    let uid = time();
+    create_new_chat_stable(user, uid, name);
 }
 
 #[update]
-fn add_chat_message(user: Principal, chat_id: ChatId, question: String, answer: String) {
-    USER_CHATS.with(|user_chats| {
-        let mut user_chats = user_chats.borrow_mut();
-        if let Some(chats) = user_chats.get_mut(&user) {
-            if let Some(chat_info) = chats.get_mut(&chat_id) {
-                chat_info.messages.push(ChatMessage { question, answer });
-            }
-        }
-    });
+fn add_chat_message(user: Principal, chat_id: u64, content: String, role: String) {
+    let _ = add_chat_message_stable(user, chat_id, content, role);
 }
 
 #[query]
-fn get_chat_history(user: Principal, chat_id: ChatId) -> ChatInfo {
-    USER_CHATS.with(|user_chats| {
-        user_chats.borrow()
-            .get(&user)
-            .and_then(|chats| chats.get(&chat_id))
-            .cloned()
-    }).expect("REASON")
+fn get_chat_history(user: Principal, chat_id: u64, msg_len: u32) -> ChatInfo {
+    get_msgs_for_user(user, chat_id, msg_len)
 }
 
 #[update]
-fn delete_chat(user: Principal, chat_id: ChatId) -> bool {
-    USER_CHATS.with(|user_chats| {
-        let mut user_chats = user_chats.borrow_mut();
-        if let Some(chats) = user_chats.get_mut(&user) {
-            return chats.remove(&chat_id).is_some();
-        }
-        false
-    })
+fn delete_chat(user: Principal, chat_id: u64) -> bool {
+    delete_chat_stable(user, chat_id)
 }
 
 #[update]
-fn rename_chat(user: Principal, chat_id: ChatId, new_name: String) -> bool {
-    USER_CHATS.with(|user_chats| {
-        let mut user_chats = user_chats.borrow_mut();
-        if let Some(chats) = user_chats.get_mut(&user) {
-            if let Some(chat_info) = chats.get_mut(&chat_id) {
-                chat_info.name = new_name;
-                return true;
-            }
-        }
-        false
-    })
+fn rename_chat(user: Principal, chat_id: u64, new_name: String) -> bool {
+    rename_chat_stable(user, chat_id, new_name)
 }
 
 #[query]
 fn list_chats(user: Principal) -> Vec<ChatMeta> {
-    USER_CHATS.with(|user_chats| {
-        user_chats.borrow()
-            .get(&user)
-            .map(|chats| {
-                chats.iter()
-                    .map(|(chat_id, info)| ChatMeta {
-                        id: chat_id.clone(),
-                        name: info.name.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    })
+    get_chats_for_user(user)
 }
 
 #[update]
