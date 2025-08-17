@@ -38,6 +38,7 @@ const messages = ref([]);
 const userInput = ref('');
 const isLoggedIn = ref(false);
 const showSidebar = ref(false);
+const aiWriting = ref(false);
 const endOfMessages = ref(null);
 
 const chatList = ref([]);
@@ -60,29 +61,31 @@ const loadChats = async () => {
   chatList.value = list;
 };
 
-const openChat = async (chatId, name) => {
+const openChat = async (chatId, msgLen) => {
   currentChatId.value = chatId;
-  currentChatName.value = name;
-  const result = await getChatHistory(loginStatus.principal, chatId);
+  //currentChatName.value = name;
+  const result = await getChatHistory(loginStatus.principal, chatId, msgLen);
   if (!result || !result.messages) {
     messages.value = [];
     return;
   }
   messages.value = result.messages.flatMap(m => [
-    { role: 'user', content: m.question },
-    { role: 'ai', content: m.answer },
+    { role: m.role, content: m.content, timestamp: m.timestamp },
   ]);
-  currentChatName.value = result.name;
+  //currentChatName.value = result.name;
   nextTick(scrollToBottom);
   loadSuggestions();
 };
 
 const createChat = async () => {
-  const id = crypto.randomUUID();
+  const uuid = crypto.randomUUID();
+  const bytes = Uint8Array.from(
+    uuid.replace(/-/g, '').match(/.{2}/g).map(b => parseInt(b, 16))
+  );
   const name = `New Chat ${chatList.value.length + 1}`;
-  await createNewChat(loginStatus.principal, id, name);
+  await createNewChat(loginStatus.principal, bytes, name);
   await loadChats();
-  await openChat(id, name);
+  await openChat(bytes, 0);
 };
 
 const sendMessage = async () => {
@@ -93,23 +96,35 @@ const sendMessage = async () => {
     return;
   }
 
-  const userMsg = { role: 'user', content: userInput.value };
+  aiWriting.value = true;
+
+  const userMsg = { role: 'user', content: userInput.value, timestamp: Date.now() };
   messages.value.push(userMsg);
 
+  const temp = userInput.value;
+  userInput.value = '';
+  await addChatMessage(
+    loginStatus.principal,
+    currentChatId.value,
+    temp,
+    'user'
+  );
+
   try {
-    const reply = await chatWithBackend(userInput.value);
-    messages.value.push({ role: 'ai', content: reply });
+    //aiWriting.value = true;
+    const reply = await chatWithBackend(temp);
+    messages.value.push({ role: 'ai', content: reply, timestamp: Date.now() });
     await addChatMessage(
       loginStatus.principal,
       currentChatId.value,
-      userInput.value,
-      reply
+      reply,
+      'ai'
     );
+    aiWriting.value = false;
   } catch (error) {
-    messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message });
+    messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message, timestamp: Date.now() });
   }
 
-  userInput.value = '';
   await nextTick();
   scrollToBottom();
   loadSuggestions();
@@ -171,7 +186,7 @@ onMounted(async () => {
             :class="{ active: chat.id === currentChatId }"
           >
             <div style="display: flex; justify-content: space-between; width: 100%; align-items: center">
-              <span @click="openChat(chat.id, chat.name)">{{ chat.name }}</span>
+              <span @click="openChat(chat.id, chat.msg_len)">{{ chat.name }}</span>
               <div style="position: relative;">
                 <button @click="showMenu = showMenu === chat.id ? null : chat.id">⋮</button>
                 <div
@@ -222,19 +237,26 @@ onMounted(async () => {
 
       <!-- Input and buttons -->
       <section class="input-container">
-        <input
-          v-model="userInput"
-          @keyup.enter="sendMessage"
-          placeholder="Type your message..."
-          class="chat-input"
-        />
-        <button @click="sendMessage" class="btn-send" :disabled="!currentChatId">Send</button>
-        <button v-if="!isLoggedIn" @click="login" class="btn-login">Login</button>
-        <span v-if="isLoggedIn" class="logged-in-text">
-          ✅ Logged In as <strong>{{ loginStatus.username }}</strong>
-          <button @click="showUsernameModal = true" class="btn-edit-username">✏️ Change Name</button>
-        </span>
-      </section>
+      <input
+        v-model="userInput"
+        @keyup.enter="sendMessage"
+        :placeholder="aiWriting ? 'AI is writing...' : 'Type your message...'"
+        class="chat-input"
+        :disabled="aiWriting"
+      />
+      <button
+        @click="sendMessage"
+        class="btn-send"
+        :disabled="!currentChatId || aiWriting"
+      >
+        Send
+      </button>
+      <button v-if="!isLoggedIn" @click="login" class="btn-login">Login</button>
+      <span v-if="isLoggedIn" class="logged-in-text">
+        ✅ Logged In as <strong>{{ loginStatus.username }}</strong>
+        <button @click="showUsernameModal = true" class="btn-edit-username">✏️ Change Name</button>
+      </span>
+    </section>
     </main>
 
     <!-- Modal for username change -->

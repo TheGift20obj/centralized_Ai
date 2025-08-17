@@ -4,8 +4,6 @@ type ChatMessage = record {
   timestamp: nat64;
 };
 
-type ChatId = text;
-
 type ChatInfo = record {
   messages: vec ChatMessage;
 };
@@ -14,11 +12,11 @@ service : {
     try_increment_user_prompt: (principal) -> (bool);
     get_user_name: (principal) -> (text) query;
     set_user_name: (principal, text) -> ();
-    create_new_chat: (principal, nat64, text) -> ();
-    add_chat_message: (principal, nat64, text, text) -> ();
-    get_chat_history: (principal, nat64) -> (ChatInfo) query;
-    delete_chat: (principal, nat64) -> (bool);
-    rename_chat: (principal, nat64, text) -> (bool);
-    list_chats: (principal) -> (vec record { name: text; id: nat64; msg_len: nat32 }) query;
+    create_new_chat: (principal, vec nat8, text) -> ();
+    add_chat_message: (principal, vec nat8, text, text) -> ();
+    get_chat_history: (principal, vec nat8, nat32) -> (ChatInfo) query;
+    delete_chat: (principal, vec nat8) -> (bool);
+    rename_chat: (principal, vec nat8, text) -> (bool);
+    list_chats: (principal) -> (vec record { name: text; id: vec nat8; msg_len: nat32 }) query;
     "chat": (text) -> (text);
 }

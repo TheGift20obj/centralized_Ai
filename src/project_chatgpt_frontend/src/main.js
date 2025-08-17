@@ -26,7 +26,10 @@ export const loginStatus = {
 };
 
 export const login = async () => {
-  const authClient = await AuthClient.create();
+  loginStatus.loggedIn = true;
+  loginStatus.principal = Principal.fromText("aaaaa-aa");
+  loginStatus.username = await getUserName(loginStatus.principal);
+  /*const authClient = await AuthClient.create();
 
   await authClient.login({
     identityProvider: "https://identity.ic0.app/#authorize",
@@ -37,7 +40,7 @@ export const login = async () => {
       loginStatus.principal = principal;
       loginStatus.username = await getUserName(loginStatus.principal);
     },
-  });
+  });*/
 };
 
 export async function chatWithBackend(message) {
@@ -48,12 +51,12 @@ export async function createNewChat(principal, chatId, name) {
   return await project_chatgpt_backend.create_new_chat(principal, chatId, name);
 }
 
-export async function addChatMessage(principal, chatId, question, answer) {
-  return await project_chatgpt_backend.add_chat_message(principal, chatId, question, answer);
+export async function addChatMessage(principal, chatId, content, role) {
+  return await project_chatgpt_backend.add_chat_message(principal, chatId, content, role);
 }
 
-export async function getChatHistory(principal, chatId) {
-  return await project_chatgpt_backend.get_chat_history(principal, chatId);
+export async function getChatHistory(principal, chatId, msgLen) {
+  return await project_chatgpt_backend.get_chat_history(principal, chatId, msgLen);
 }
 
 export async function deleteChat(principal, chatId) {
