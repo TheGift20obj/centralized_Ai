@@ -43,16 +43,16 @@ export const login = async () => {
   });*/
 };
 
-export async function chatWithBackend(message) {
-  return await project_chatgpt_backend.chat(message);
+export async function chatWithBackend(message, width, height, tag, principal, chatId, msgLen) {
+  return await project_chatgpt_backend.chat(message, width, height, tag, principal, chatId, msgLen);
 }
 
 export async function createNewChat(principal, chatId, name) {
   return await project_chatgpt_backend.create_new_chat(principal, chatId, name);
 }
 
-export async function addChatMessage(principal, chatId, content, role) {
-  return await project_chatgpt_backend.add_chat_message(principal, chatId, content, role);
+export async function addChatMessage(principal, chatId, content, role, width, height) {
+  return await project_chatgpt_backend.add_chat_message(principal, chatId, content, role, width, height);
 }
 
 export async function getChatHistory(principal, chatId, msgLen) {

@@ -15,6 +15,18 @@ import {
   tryPrompt,
   getRandomUserMessages,
 } from './main.js';
+import HexGrid from './HexGrid.vue';
+
+const selectedModel = ref("Llama3_1_8B");
+
+const gridX = ref(16);
+const gridY = ref(16);
+
+function hasHex(content) {
+  // sprawdzamy czy w tekście jest co najmniej jeden #RRGGBB
+  const hexRegex = /#[0-9A-Fa-f]{6}/g;
+  return hexRegex.test(content);
+}
 
 const formatMarkdown = (text) => {
   let formatted = text;
@@ -70,7 +82,7 @@ const openChat = async (chatId, msgLen) => {
     return;
   }
   messages.value = result.messages.flatMap(m => [
-    { role: m.role, content: m.content, timestamp: m.timestamp },
+    { role: m.role, content: m.content, etc: m.etc },
   ]);
   //currentChatName.value = result.name;
   nextTick(scrollToBottom);
@@ -98,7 +110,7 @@ const sendMessage = async () => {
 
   aiWriting.value = true;
 
-  const userMsg = { role: 'user', content: userInput.value, timestamp: Date.now() };
+  const userMsg = { role: 'user', content: userInput.value, etc: [Date.now(), 0, 0] };
   messages.value.push(userMsg);
 
   const temp = userInput.value;
@@ -107,22 +119,23 @@ const sendMessage = async () => {
     loginStatus.principal,
     currentChatId.value,
     temp,
-    'user'
+    'user', 0, 0
   );
 
   try {
     //aiWriting.value = true;
-    const reply = await chatWithBackend(temp);
-    messages.value.push({ role: 'ai', content: reply, timestamp: Date.now() });
+    const reply = await chatWithBackend(temp, gridX.value, gridY.value, selectedModel.value, loginStatus.principal, currentChatId.value, messages.value.length);
+    messages.value.push({ role: selectedModel.value, content: reply, etc: [Date.now(), gridX.value, gridY.value] });
     await addChatMessage(
       loginStatus.principal,
       currentChatId.value,
       reply,
-      'ai'
+      selectedModel.value, gridX.value, gridY.value
     );
     aiWriting.value = false;
   } catch (error) {
-    messages.value.push({ role: 'ai', content: 'Connection error! ' + error.message, timestamp: Date.now() });
+    messages.value.push({ role: selectedModel.value, content: 'Connection error! ' + error.message, timestamp: Date.now() });
+    aiWriting.value = false;
   }
 
   await nextTick();
@@ -132,7 +145,7 @@ const sendMessage = async () => {
 
 const sendSuggestion = async (msg) => {
   userInput.value = msg;
-  await sendMessage();
+  //await sendMessage();
 };
 
 const scrollToBottom = () => {
@@ -209,15 +222,27 @@ onMounted(async () => {
         <div
           v-for="(msg, index) in messages"
           :key="index"
-          :class="['message', msg.role === 'ai' ? 'ai-message' : 'user-message']"
+          :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']"
         >
-          <template v-if="msg.role === 'ai'">
-            <span class="message-role">AI:</span>
-            <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
-          </template>
-          <template v-else>
+          <template v-if="msg.role === 'user'">
             <span class="message-content">{{ msg.content }}</span>
             <span class="message-role">:{{ loginStatus.username }}</span>
+          </template>
+          <template v-else>
+            <span class="message-role">{{ msg.role }}:</span>
+            <template v-if="hasHex(msg.content)">
+              <HexGrid 
+                :content="msg.content" 
+                :grid-cols="msg.etc[1]" 
+                :grid-rows="msg.etc[2]"
+                class="hex-grid" 
+              />
+            </template>
+
+            <!-- jeżeli nie zawiera #HEX -->
+            <template v-else>
+              <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
+            </template>
           </template>
         </div>
         <div ref="endOfMessages" />
@@ -255,6 +280,24 @@ onMounted(async () => {
       <span v-if="isLoggedIn" class="logged-in-text">
         ✅ Logged In as <strong>{{ loginStatus.username }}</strong>
         <button @click="showUsernameModal = true" class="btn-edit-username">✏️ Change Name</button>
+        <label for="modelSelect">Wybierz model:</label>
+        <select id="modelSelect" v-model="selectedModel">
+          <option value="Llama3_1_8B">Llama3_1_8B</option>
+          <option value="Qwen3_32B">Qwen3_32B</option>
+          <option value="Llama4Scout">Llama4Scout</option>
+          <option value="Llama4Scout_Image">Llama4Scout_Image</option>
+        </select>
+        <!-- Dostosowanie rozmiaru tylko dla Llama4Scout_Image -->
+        <div v-if="selectedModel === 'Llama4Scout_Image'" class="size-settings">
+          <label>
+            X:
+            <input type="number" v-model.number="gridX" :min="8" :max="16"/>
+          </label>
+          <label>
+            Y:
+            <input type="number" v-model.number="gridY" :min="8" :max="16"/>
+          </label>
+        </div>
       </span>
     </section>
     </main>
@@ -276,6 +319,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.hex-grid {
+  margin: 10px auto;
+}
 .modal-overlay {
   position: fixed;
   top: 0;

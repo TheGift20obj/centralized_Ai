@@ -1,7 +1,7 @@
 type ChatMessage = record {
   role: text;
   content: text;
-  timestamp: nat64;
+  etc: record { nat64; nat32; nat32 };
 };
 
 type ChatInfo = record {
@@ -13,10 +13,10 @@ service : {
     get_user_name: (principal) -> (text) query;
     set_user_name: (principal, text) -> ();
     create_new_chat: (principal, vec nat8, text) -> ();
-    add_chat_message: (principal, vec nat8, text, text) -> ();
+    add_chat_message: (principal, vec nat8, text, text, nat32, nat32) -> ();
     get_chat_history: (principal, vec nat8, nat32) -> (ChatInfo) query;
     delete_chat: (principal, vec nat8) -> (bool);
     rename_chat: (principal, vec nat8, text) -> (bool);
     list_chats: (principal) -> (vec record { name: text; id: vec nat8; msg_len: nat32 }) query;
-    "chat": (text) -> (text);
+    "chat": (text, nat32, nat32, text, principal, vec nat8, nat32) -> (text);
 }
