@@ -26,10 +26,10 @@ export const loginStatus = {
 };
 
 export const login = async () => {
-  loginStatus.loggedIn = true;
+  /*loginStatus.loggedIn = true;
   loginStatus.principal = Principal.fromText("aaaaa-aa");
-  loginStatus.username = await getUserName(loginStatus.principal);
-  /*const authClient = await AuthClient.create();
+  loginStatus.username = await getUserName(loginStatus.principal);*/
+  const authClient = await AuthClient.create();
 
   await authClient.login({
     identityProvider: "https://identity.ic0.app/#authorize",
@@ -40,8 +40,12 @@ export const login = async () => {
       loginStatus.principal = principal;
       loginStatus.username = await getUserName(loginStatus.principal);
     },
-  });*/
+  });
 };
+
+export async function archiveChat(principal, chatId, archive) {
+  return await project_chatgpt_backend.archive_chat(principal, chatId, archive);
+}
 
 export async function chatWithBackend(message, width, height, tag, principal, chatId, msgLen) {
   return await project_chatgpt_backend.chat(message, width, height, tag, principal, chatId, msgLen);
@@ -51,8 +55,8 @@ export async function createNewChat(principal, chatId, name) {
   return await project_chatgpt_backend.create_new_chat(principal, chatId, name);
 }
 
-export async function addChatMessage(principal, chatId, content, role, width, height) {
-  return await project_chatgpt_backend.add_chat_message(principal, chatId, content, role, width, height);
+export async function addChatMessage(principal, chatId, content, role, width, height, date) {
+  return await project_chatgpt_backend.add_chat_message(principal, chatId, content, role, width, height, date);
 }
 
 export async function getChatHistory(principal, chatId, msgLen) {
@@ -67,8 +71,8 @@ export async function renameChat(principal, chatId, newName) {
   return await project_chatgpt_backend.rename_chat(principal, chatId, newName);
 }
 
-export async function listChats(principal) {
-  return await project_chatgpt_backend.list_chats(principal);
+export async function listChats(principal, arch) {
+  return await project_chatgpt_backend.list_chats(principal, arch);
 }
 
 export async function setUserName(principal, username) {

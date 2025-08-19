@@ -14,6 +14,7 @@ import {
   getUserName,
   tryPrompt,
   getRandomUserMessages,
+  archiveChat,
 } from './main.js';
 import HexGrid from './HexGrid.vue';
 
@@ -63,17 +64,38 @@ const showMenu = ref(null);
 
 const suggestions = ref([]);
 
+const showArchives = ref(false);
+const archives = ref([]);
+
 const loadSuggestions = () => {
   suggestions.value = getRandomUserMessages();
 };
 
+const archiveChatAction = async (chatId, archive) => {
+  await archiveChat(loginStatus.principal, chatId, archive);
+  if (showArchives.value) {
+    await openArchives();
+  }
+  if (archive && currentChatId.value === chatId) {
+    currentChatId.value = null;
+    messages.value = [];
+  }
+  await loadChats();
+};
+
 const loadChats = async () => {
   if (!loginStatus.loggedIn) return;
-  const list = await listChats(loginStatus.principal);
-  chatList.value = list;
+  chatList.value = await listChats(loginStatus.principal, false);
+};
+
+const openArchives = async () => {
+  if (!loginStatus.loggedIn) return;
+  showArchives.value = true;
+  archives.value = await listChats(loginStatus.principal, true);
 };
 
 const openChat = async (chatId, msgLen) => {
+  if (!loginStatus.loggedIn) return;
   currentChatId.value = chatId;
   //currentChatName.value = name;
   const result = await getChatHistory(loginStatus.principal, chatId, msgLen);
@@ -90,6 +112,7 @@ const openChat = async (chatId, msgLen) => {
 };
 
 const createChat = async () => {
+  if (!loginStatus.loggedIn) return;
   const uuid = crypto.randomUUID();
   const bytes = Uint8Array.from(
     uuid.replace(/-/g, '').match(/.{2}/g).map(b => parseInt(b, 16))
@@ -119,7 +142,7 @@ const sendMessage = async () => {
     loginStatus.principal,
     currentChatId.value,
     temp,
-    'user', 0, 0
+    'user', 0, 0, Date.now()
   );
 
   try {
@@ -130,11 +153,17 @@ const sendMessage = async () => {
       loginStatus.principal,
       currentChatId.value,
       reply,
-      selectedModel.value, gridX.value, gridY.value
+      selectedModel.value, gridX.value, gridY.value, Date.now()
     );
     aiWriting.value = false;
   } catch (error) {
-    messages.value.push({ role: selectedModel.value, content: 'Connection error! ' + error.message, timestamp: Date.now() });
+    messages.value.push({ role: selectedModel.value, content: "Sorry, I'm currently overloaded. Could you please try again?", etc: [Date.now(), gridX.value, gridY.value] });
+    await addChatMessage(
+      loginStatus.principal,
+      currentChatId.value,
+      "Sorry, I'm currently overloaded. Could you please try again?",
+      selectedModel.value, gridX.value, gridY.value
+    );
     aiWriting.value = false;
   }
 
@@ -192,6 +221,19 @@ onMounted(async () => {
       <div v-if="showSidebar" class="sidebar-content">
         <h3>Chat List</h3>
         <button @click="createChat">+ New Chat</button>
+        <button @click="openArchives">Archives</button>
+
+        <!-- Okienko z archiwami -->
+        <div v-if="showArchives" class="archive-modal">
+          <h2 class="chat-name">Archived Chats</h2>
+          <ul>
+            <li v-for="chat in archives" :key="chat.id" class="archive-item">
+              <span class="chat-name">{{ chat.name }}</span>
+              <button @click="archiveChatAction(chat.id, false)">Restore</button>
+            </li>
+          </ul>
+          <button class="close-btn" @click="showArchives = false">Close</button>
+        </div>
         <ul>
           <li
             v-for="chat in chatList"
@@ -207,6 +249,7 @@ onMounted(async () => {
                   style="position: absolute; right: 0; background: white; color: black; border: 1px solid #ccc; padding: 4px; border-radius: 4px; z-index: 1;"
                 >
                   <button @click="() => renameChatPrompt(chat.id, chat.name)">✏️ Rename</button><br />
+                  <button @click="() => archiveChatAction(chat.id, true)">📦 Archive</button><br />
                   <button @click="() => removeChat(chat.id)">🗑️ Delete</button>
                 </div>
               </div>
@@ -226,10 +269,18 @@ onMounted(async () => {
         >
           <template v-if="msg.role === 'user'">
             <span class="message-content">{{ msg.content }}</span>
-            <span class="message-role">:{{ loginStatus.username }}</span>
+            <span class="message-role_user">:{{ loginStatus.username }}<br>{{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { year: 'numeric', 
+              month: '2-digit', 
+              day: '2-digit', 
+              hour: '2-digit', 
+              minute: '2-digit'  }) }}</span>
           </template>
           <template v-else>
-            <span class="message-role">{{ msg.role }}:</span>
+            <span class="message-role_ai">{{ msg.role }}:<br>{{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { year: 'numeric', 
+              month: '2-digit', 
+              day: '2-digit', 
+              hour: '2-digit', 
+              minute: '2-digit'  }) }}</span>
             <template v-if="hasHex(msg.content)">
               <HexGrid 
                 :content="msg.content" 
@@ -280,15 +331,16 @@ onMounted(async () => {
       <span v-if="isLoggedIn" class="logged-in-text">
         ✅ Logged In as <strong>{{ loginStatus.username }}</strong>
         <button @click="showUsernameModal = true" class="btn-edit-username">✏️ Change Name</button>
-        <label for="modelSelect">Wybierz model:</label>
+        <label for="modelSelect"> Select Model: </label>
         <select id="modelSelect" v-model="selectedModel">
           <option value="Llama3_1_8B">Llama3_1_8B</option>
           <option value="Qwen3_32B">Qwen3_32B</option>
           <option value="Llama4Scout">Llama4Scout</option>
           <option value="Llama4Scout_Image">Llama4Scout_Image</option>
+          <option value="Llama3_1_8B_Image">Llama3_1_8B_Image</option>
         </select>
         <!-- Dostosowanie rozmiaru tylko dla Llama4Scout_Image -->
-        <div v-if="selectedModel === 'Llama4Scout_Image'" class="size-settings">
+        <div v-if="selectedModel === 'Llama4Scout_Image' || selectedModel === 'Llama3_1_8B_Image'" class="size-settings">
           <label>
             X:
             <input type="number" v-model.number="gridX" :min="8" :max="16"/>
@@ -319,9 +371,254 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.hex-grid {
-  margin: 10px auto;
+body, html {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #f5f7fa;
+  color: #333;
 }
+
+.app-wrapper {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ================== Sidebar ================== */
+.sidebar {
+  width: 50px;
+  background-color: #1f2937;
+  color: #fff;
+  transition: width 0.3s;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar.open {
+  width: 220px;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  right: -15px;
+  top: 20px;
+  width: 30px;
+  height: 30px;
+  background-color: #1f2937;
+  color: white;
+  text-align: center;
+  cursor: pointer;
+  font-size: 18px;
+  border-radius: 0 5px 5px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+
+.sidebar-content {
+  padding: 15px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-content h3 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.sidebar-content button {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.sidebar-content button:hover {
+  background: #2563eb;
+}
+
+.sidebar-content ul {
+  list-style: none;
+  padding: 0;
+  margin-top: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sidebar-content li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sidebar-content li:hover {
+  background-color: rgba(255,255,255,0.1);
+}
+
+.sidebar-content li.active {
+  background-color: #2563eb;
+  font-weight: bold;
+}
+
+/* ================== Chat Area ================== */
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  background: #f5f7fa;
+}
+
+.messages-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  display: flex;
+  align-items: flex-start;
+  max-width: 70%;
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  gap: 0.5rem;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.ai-message {
+  background-color: #e0f2fe;
+  align-self: flex-start;
+}
+
+.user-message {
+  background-color: #d1f7c4;
+  align-self: flex-end;
+}
+
+.message-role_ai {
+  font-weight: 600;
+  color: #555;
+  align-self: flex-start;
+  white-space: nowrap;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.message-role_user {
+  font-weight: 600;
+  color: #555;
+  align-self: flex-end;
+  white-space: nowrap;
+  text-align: left;
+  flex-shrink: 0;
+}
+
+.message-content pre {
+  background: #f6f8fa;
+  padding: 0.75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: 'Fira Code', monospace;
+}
+
+.message-content h1, h2, h3 {
+  margin: 0.5em 0 0.3em;
+  font-weight: 700;
+}
+
+.message-content p {
+  margin: 0.3em 0;
+}
+
+/* ================== Input ================== */
+.input-container {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+  outline: none;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.chat-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 5px rgba(59,130,246,0.3);
+}
+
+.btn-send, .btn-login {
+  padding: 0.7rem 1.2rem;
+  border-radius: 12px;
+  border: none;
+  background-color: #3b82f6;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.btn-send:disabled {
+  background-color: #a5b4fc;
+  cursor: not-allowed;
+}
+
+.btn-send:hover:not(:disabled),
+.btn-login:hover {
+  background-color: #2563eb;
+}
+
+/* ================== Suggestions ================== */
+.suggestions-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.suggestion-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background-color: #f0f0f0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.suggestion-btn:hover {
+  background-color: #e0e0e0;
+  transform: translateY(-1px);
+}
+
+/* ================== Modal ================== */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -338,9 +635,10 @@ onMounted(async () => {
 .modal-content {
   background: white;
   padding: 2rem;
-  border-radius: 8px;
-  min-width: 300px;
-  max-width: 90%;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
 }
 
 .modal-buttons {
@@ -352,202 +650,11 @@ onMounted(async () => {
 .btn-edit-username {
   margin-left: 0.5rem;
   padding: 0.3rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
-.app-wrapper {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  font-family: 'Segoe UI', sans-serif;
-}
-
-.sidebar {
-  width: 40px;
-  background-color: #1e1e2f;
-  color: white;
-  transition: width 0.3s;
-  position: relative;
-}
-
-.sidebar.open {
-  width: 240px;
-}
-
-.sidebar-toggle {
-  position: absolute;
-  right: -20px;
-  top: 20px;
-  width: 20px;
-  height: 40px;
-  background-color: #1e1e2f;
-  color: white;
-  text-align: center;
-  cursor: pointer;
-  font-size: 20px;
-  border-radius: 0 5px 5px 0;
-}
-
-.sidebar-content {
-  padding: 10px;
-}
-
-.sidebar-content ul {
-  list-style: none;
-  padding: 0;
-}
-
-.sidebar-content li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  cursor: pointer;
-  border-bottom: 1px solid #444;
-}
-
-.sidebar-content li.active {
-  font-weight: bold;
-  color: #00d1b2;
-}
-
-.chat-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background: #f0f2f5;
-  padding: 1rem;
-}
-
-.messages-container {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
-}
-
-.message {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.75rem;
-  padding: 0.5rem;
-  border-radius: 6px;
-  max-width: 70%;
-  gap: 0.5rem;
-}
-
-.ai-message {
-  justify-content: flex-start;
-  background: #e3f2fd;
-  align-self: flex-start;
-  text-align: left;
-}
-
-.user-message {
-  justify-content: flex-end;
-  background: #d1f7c4;
-  align-self: flex-end;
-  text-align: right;
-}
-
-.message-role {
-  font-weight: bold;
-  margin: 0 5px;
-  color: #555;
-  align-self: flex-start;
-}
-
-.input-container {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.suggestions-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.suggestion-btn {
-  padding: 0.4rem 0.8rem;
-  background-color: #f0f0f0;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background-color 0.2s;
-}
-
-.suggestion-btn:hover {
-  background-color: #e0e0e0;
-}
-
-.chat-input {
-  flex: 1;
-  padding: 0.6rem;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  font-size: 1rem;
-}
-
-.btn-send, .btn-login {
-  padding: 0.6rem 1.2rem;
-  background-color: #00d1b2;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-.btn-send:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-.logged-in-text {
-  align-self: center;
-  font-size: 0.9rem;
-  color: green;
-  font-weight: bold;
-}
-.message-content pre {
-  background: #f6f8fa;
-  padding: 0.75rem;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-family: monospace;
-  white-space: pre-wrap;
-}
-
-.message-content h1, h2, h3 {
-  margin: 0.5em 0 0.3em;
-  font-weight: bold;
-}
-
-.message-content ul, .message-content ol {
-  padding-left: 1.5em;
-  margin: 0.3em 0;
-}
-
-.message-content li {
-  margin-bottom: 0.3em;
-}
-
-.message-content strong {
-  font-weight: bold;
-}
-
-.message-content em {
-  font-style: italic;
-}
-
-.message-content p {
-  margin: 0.4em 0;
+/* ================== Hex Grid ================== */
+.hex-grid {
+  margin: 10px auto;
 }
 </style>

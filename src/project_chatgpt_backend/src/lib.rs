@@ -1,4 +1,5 @@
 use candid::{Principal, CandidType};
+use core::arch;
 use std::collections::HashMap;
 use ic_cdk_macros::{update, query};
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use std::cell::RefCell;
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
-const PROMPT_LIMIT: u32 = 50;
+const PROMPT_LIMIT: u32 = 250;
 const BLOCK_TIME_NANOS: u64 = 12 * 60 * 60 * 1_000_000_000;
 
 #[derive(Clone, CandidType, Deserialize, Serialize)]
@@ -58,11 +59,49 @@ thread_local! {
         )
     );
 
+    static USER_ARCHIVE_STABLE: RefCell<StableBTreeMap<(Principal, [u8; 16]), ([u8; 64], u32), Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(4)))
+        )
+    );
+
     static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 32], [u8; 4096], (u64, u32, u32)), Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
         )
     );
+}
+
+fn set_chat_archived_stable(user: Principal, chat_id: [u8; 16], archived: bool) -> bool {
+    if archived {
+        // przenieś do archiwum
+        USER_CHATS_STABLE.with(|map| {
+            let mut map = map.borrow_mut();
+            if let Some((name, msg_count)) = map.remove(&(user, chat_id)) {
+                USER_ARCHIVE_STABLE.with(|archive| {
+                    archive
+                        .borrow_mut()
+                        .insert((user, chat_id), (name, msg_count));
+                });
+                true
+            } else {
+                false
+            }
+        })
+    } else {
+        // przenieś z archiwum z powrotem do normalnej mapy
+        USER_ARCHIVE_STABLE.with(|archive| {
+            let mut archive = archive.borrow_mut();
+            if let Some((name, msg_count)) = archive.remove(&(user, chat_id)) {
+                USER_CHATS_STABLE.with(|map| {
+                    map.borrow_mut().insert((user, chat_id), (name, msg_count));
+                });
+                true
+            } else {
+                false
+            }
+        })
+    }
 }
 
 fn option_f64_to_bytes(opt: Option<u64>) -> [u8; 9] {
@@ -159,6 +198,23 @@ fn get_chats_for_user(user: Principal) -> Vec<ChatMeta> {
     })
 }
 
+fn get_archives_for_user(user: Principal) -> Vec<ChatMeta> {
+    USER_ARCHIVE_STABLE.with(|map_ref| {
+        let map = map_ref.borrow();
+        map.iter()
+            .filter_map(|entry| {
+                let (p, index) = entry.key();
+                let (name, msg_count) = entry.value();
+                if *p == user {
+                    Some(ChatMeta {name: fixed_bytes_to_string(&name), id: index.clone(), msg_len: msg_count })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
 fn get_msgs_for_user(user: Principal, chat_id: [u8; 16], msg_count: u32) -> ChatInfo {
     CHAT_MESSAGES_STABLE.with(|map_ref| {
         let map = map_ref.borrow();
@@ -220,8 +276,7 @@ fn rename_chat_stable(user: Principal, chat_id: [u8; 16], new_name: String) -> b
     })
 }
 
-fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, role: String, width: u32, height: u32) -> bool {
-    let timestamp = time();
+fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, role: String, width: u32, height: u32, timestamp: u64) -> bool {
     let etc = (timestamp, width, height);
     USER_CHATS_STABLE.with(|chat_map| {
         let mut chat_map = chat_map.borrow_mut();
@@ -264,7 +319,7 @@ async fn chat(prompt: String, width: u32, height: u32, tag: String, user: Princi
     let cols = width;
     let new_prompt = prompt.clone();
 
-    let mut max_history = 9;
+    let mut max_history = 5;
 
     let model = match tag.as_str() {
         "Llama3_1_8B" => {
@@ -277,8 +332,12 @@ async fn chat(prompt: String, width: u32, height: u32, tag: String, user: Princi
             Model::Llama4Scout
         }
         "Llama4Scout_Image" => {
-            max_history = 8;
+            max_history = 4;
             Model::Llama4Scout
+        }
+        "Llama3_1_8B_Image" => {
+            max_history = 4;
+            Model::Llama3_1_8B
         }
         _ => {
             Model::Llama3_1_8B
@@ -315,7 +374,7 @@ async fn chat(prompt: String, width: u32, height: u32, tag: String, user: Princi
     }
 
     match tag.as_str() {
-        "Llama4Scout_Image" => {
+        "Llama4Scout_Image" | "Llama3_1_8B_Image" => {
             // budujemy specjalny system prompt dla HEX
             let sys_prompt = format!(
                 "You are an AI that only outputs pixel-art in HEX grid format.
@@ -360,8 +419,8 @@ fn create_new_chat(user: Principal, uid: [u8; 16], name: String) {
 }
 
 #[update]
-fn add_chat_message(user: Principal, chat_id: [u8; 16], content: String, role: String, width: u32, height: u32) {
-    let _ = add_chat_message_stable(user, chat_id, content, role, width, height);
+fn add_chat_message(user: Principal, chat_id: [u8; 16], content: String, role: String, width: u32, height: u32, date: u64) {
+    let _ = add_chat_message_stable(user, chat_id, content, role, width, height, date);
 }
 
 #[query]
@@ -380,8 +439,12 @@ fn rename_chat(user: Principal, chat_id: [u8; 16], new_name: String) -> bool {
 }
 
 #[query]
-fn list_chats(user: Principal) -> Vec<ChatMeta> {
-    get_chats_for_user(user)
+fn list_chats(user: Principal, arch: bool) -> Vec<ChatMeta> {
+    if arch {
+        get_archives_for_user(user)
+    } else {
+        get_chats_for_user(user) 
+    }
 }
 
 #[update]
@@ -398,4 +461,9 @@ fn get_user_name(user: Principal) -> String {
 #[update]
 pub fn try_increment_user_prompt(user: Principal) -> bool {
     inc_user_prompt_stable(user)
+}
+
+#[update]
+fn archive_chat(user: Principal, chat_id: [u8; 16], archive: bool) -> bool {
+    set_chat_archived_stable(user, chat_id, archive)
 }
