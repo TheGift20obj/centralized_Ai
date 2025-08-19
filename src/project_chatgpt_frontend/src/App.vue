@@ -221,80 +221,96 @@ onMounted(async () => {
       <div v-if="showSidebar" class="sidebar-content">
         <h3>Chat List</h3>
         <button @click="createChat">+ New Chat</button>
-        <button @click="openArchives">Archives</button>
+        <button @click="openArchives">📦 Archives</button>
 
-        <!-- Okienko z archiwami -->
-        <div v-if="showArchives" class="archive-modal">
-          <h2 class="chat-name">Archived Chats</h2>
-          <ul>
-            <li v-for="chat in archives" :key="chat.id" class="archive-item">
-              <span class="chat-name">{{ chat.name }}</span>
-              <button @click="archiveChatAction(chat.id, false)">Restore</button>
-            </li>
-          </ul>
-          <button class="close-btn" @click="showArchives = false">Close</button>
+        <!-- Archive Modal -->
+        <div v-if="showArchives" class="modal-overlay">
+          <div class="modal-content">
+            <h3>Archived Chats</h3>
+            <section class="chat-list-container">
+              <ul class="archive-list">
+                <li v-for="chat in archives" :key="chat.id" class="archive-item">
+                  <span class="chat-name">{{ chat.name }}</span>
+                  <button @click="archiveChatAction(chat.id, false)">Restore</button>
+                </li>
+              </ul>
+            </section>
+            <div class="modal-buttons">
+              <button class="btn-secondary" @click="showArchives = false">Close</button>
+            </div>
+          </div>
         </div>
-        <ul>
-          <li
-            v-for="chat in chatList"
-            :key="chat.id"
-            :class="{ active: chat.id === currentChatId }"
-          >
-            <div style="display: flex; justify-content: space-between; width: 100%; align-items: center">
-              <span @click="openChat(chat.id, chat.msg_len)">{{ chat.name }}</span>
-              <div style="position: relative;">
-                <button @click="showMenu = showMenu === chat.id ? null : chat.id">⋮</button>
-                <div
-                  v-if="showMenu === chat.id"
-                  style="position: absolute; right: 0; background: white; color: black; border: 1px solid #ccc; padding: 4px; border-radius: 4px; z-index: 1;"
-                >
-                  <button @click="() => renameChatPrompt(chat.id, chat.name)">✏️ Rename</button><br />
-                  <button @click="() => archiveChatAction(chat.id, true)">📦 Archive</button><br />
-                  <button @click="() => removeChat(chat.id)">🗑️ Delete</button>
+
+        <!-- Chat list -->
+        <section class="chat-list-container">
+          <ul class="chat-list">
+            <li
+              v-for="chat in chatList"
+              :key="chat.id"
+              :class="{ active: chat.id === currentChatId }"
+              class="chat-item"
+            >
+              <div class="chat-row">
+                <span class="chat-name" @click="openChat(chat.id, chat.msg_len)">
+                  {{ chat.name }}
+                </span>
+                <div class="chat-actions">
+                  <button class="dots-btn" @click="showMenu = showMenu === chat.id ? null : chat.id">⋮</button>
+                  
+                  <!-- Dropdown -->
+                  <div v-if="showMenu === chat.id" class="chat-menu">
+                    <button @click="() => renameChatPrompt(chat.id, chat.name)" class="cass">✏️ Rename</button>
+                    <button @click="() => archiveChatAction(chat.id, true)" class="cass">📦 Archive</button>
+                    <button @click="() => removeChat(chat.id)" class="danger">🗑️ Delete</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </li>
-        </ul>
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
 
     <!-- Chat area -->
     <main class="chat-container">
+      <!-- Messages -->
       <section class="messages-container">
         <div
           v-for="(msg, index) in messages"
           :key="index"
-          :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']"
+          class="message-block"
         >
-          <template v-if="msg.role === 'user'">
-            <span class="message-content">{{ msg.content }}</span>
-            <span class="message-role_user">:{{ loginStatus.username }}<br>{{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { year: 'numeric', 
-              month: '2-digit', 
-              day: '2-digit', 
-              hour: '2-digit', 
-              minute: '2-digit'  }) }}</span>
-          </template>
-          <template v-else>
-            <span class="message-role_ai">{{ msg.role }}:<br>{{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { year: 'numeric', 
-              month: '2-digit', 
-              day: '2-digit', 
-              hour: '2-digit', 
-              minute: '2-digit'  }) }}</span>
-            <template v-if="hasHex(msg.content)">
-              <HexGrid 
-                :content="msg.content" 
-                :grid-cols="msg.etc[1]" 
-                :grid-rows="msg.etc[2]"
-                class="hex-grid" 
-              />
-            </template>
+          <!-- Date -->
+          <div class="message-date">
+            {{ new Date(Number(msg.etc[0])).toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' }) }}
+          </div>
 
-            <!-- jeżeli nie zawiera #HEX -->
-            <template v-else>
-              <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
-            </template>
-          </template>
+          <!-- User -->
+          <div v-if="msg.role === 'user'" class="message-wrapper user-wrapper">
+            <div class="message-author">{{ loginStatus.username }}</div>
+            <div class="message user-message">
+              <span class="message-content">{{ msg.content }}</span>
+            </div>
+            <div class="message-time">
+              {{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}
+            </div>
+          </div>
+
+          <!-- AI -->
+          <div v-else class="message-wrapper ai-wrapper">
+            <div class="message-author">AI</div>
+            <div class="message ai-message">
+              <template v-if="hasHex(msg.content)">
+                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" class="hex-grid"/>
+              </template>
+              <template v-else>
+                <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
+              </template>
+            </div>
+            <div class="message-time">
+              {{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}
+            </div>
+          </div>
         </div>
         <div ref="endOfMessages" />
       </section>
@@ -307,76 +323,81 @@ onMounted(async () => {
           class="suggestion-btn"
           @click="sendSuggestion(s)"
         >
-          {{ s }}
+          💡 {{ s }}
         </button>
       </section>
 
-      <!-- Input and buttons -->
+      <!-- Input -->
       <section class="input-container">
-      <input
-        v-model="userInput"
-        @keyup.enter="sendMessage"
-        :placeholder="aiWriting ? 'AI is writing...' : 'Type your message...'"
-        class="chat-input"
-        :disabled="aiWriting"
-      />
-      <button
-        @click="sendMessage"
-        class="btn-send"
-        :disabled="!currentChatId || aiWriting"
-      >
-        Send
-      </button>
-      <button v-if="!isLoggedIn" @click="login" class="btn-login">Login</button>
-      <span v-if="isLoggedIn" class="logged-in-text">
-        ✅ Logged In as <strong>{{ loginStatus.username }}</strong>
-        <button @click="showUsernameModal = true" class="btn-edit-username">✏️ Change Name</button>
-        <label for="modelSelect"> Select Model: </label>
-        <select id="modelSelect" v-model="selectedModel">
-          <option value="Llama3_1_8B">Llama3_1_8B</option>
-          <option value="Qwen3_32B">Qwen3_32B</option>
-          <option value="Llama4Scout">Llama4Scout</option>
-          <option value="Llama4Scout_Image">Llama4Scout_Image</option>
-          <option value="Llama3_1_8B_Image">Llama3_1_8B_Image</option>
-        </select>
-        <!-- Dostosowanie rozmiaru tylko dla Llama4Scout_Image -->
-        <div v-if="selectedModel === 'Llama4Scout_Image' || selectedModel === 'Llama3_1_8B_Image'" class="size-settings">
-          <label>
-            X:
-            <input type="number" v-model.number="gridX" :min="8" :max="16"/>
-          </label>
-          <label>
-            Y:
-            <input type="number" v-model.number="gridY" :min="8" :max="16"/>
-          </label>
+        <input
+          v-model="userInput"
+          @keyup.enter="sendMessage"
+          :placeholder="aiWriting ? 'AI is writing...' : 'Type your message...'"
+          class="chat-input"
+          :disabled="aiWriting"
+        />
+        <button @click="sendMessage" class="btn-send" :disabled="!currentChatId || aiWriting">
+          Send
+        </button>
+      </section>
+
+      <!-- Footer Controls -->
+      <section class="footer-controls">
+        <div v-if="!isLoggedIn">
+          <button @click="login" class="btn-login">Login</button>
         </div>
-      </span>
-    </section>
+        <div v-else class="user-controls">
+          <span class="logged-in-badge">✅ {{ loginStatus.username }}</span>
+          <button @click="showUsernameModal = true" class="btn-small">✏️ Change Name</button>
+          
+          <!-- Model selector -->
+          <div class="model-settings">
+            <label for="modelSelect">Model:</label>
+            <select id="modelSelect" v-model="selectedModel">
+              <option value="Llama3_1_8B">Llama3_1_8B</option>
+              <option value="Qwen3_32B">Qwen3_32B</option>
+              <option value="Llama4Scout">Llama4Scout</option>
+              <option value="Llama4Scout_Image">Llama4Scout_Image</option>
+              <option value="Llama3_1_8B_Image">Llama3_1_8B_Image</option>
+            </select>
+          </div>
+
+          <!-- Grid size (only for image models) -->
+          <div v-if="selectedModel.includes('Image')" class="size-settings">
+            <label>X:<input type="number" v-model.number="gridX" :min="8" :max="16"/></label>
+            <label>Y:<input type="number" v-model.number="gridY" :min="8" :max="16"/></label>
+          </div>
+        </div>
+      </section>
     </main>
 
-    <!-- Modal for username change -->
+    <!-- Modal: Change Username -->
     <div v-if="showUsernameModal" class="modal-overlay">
       <div class="modal-content">
         <h2>Change Username</h2>
         <input v-model="tempUsername" placeholder="Enter new name..." />
         <div class="modal-buttons">
-          <button
+          <button class="btn-primary"
             @click="() => { loginStatus.username = tempUsername; showUsernameModal = false; setUserName(loginStatus.principal, loginStatus.username); }"
           >Save</button>
-          <button @click="() => { showUsernameModal = false }">Cancel</button>
+          <button class="btn-secondary" @click="() => { showUsernameModal = false }">Cancel</button>
         </div>
       </div>
     </div>
   </div>
 </template>
 
+
 <style scoped>
+/* ================== Global ================== */
 body, html {
   margin: 0;
   padding: 0;
   font-family: 'Inter', sans-serif;
-  background-color: #f5f7fa;
+  background: linear-gradient(135deg, #eef2f3, #dfe9f3);
   color: #333;
+  height: 100%;
+  overflow: hidden;
 }
 
 .app-wrapper {
@@ -387,91 +408,96 @@ body, html {
 
 /* ================== Sidebar ================== */
 .sidebar {
-  width: 50px;
-  background-color: #1f2937;
+  width: 60px;
+  background: rgba(31, 41, 55, 0.9);
+  backdrop-filter: blur(8px);
   color: #fff;
-  transition: width 0.3s;
+  transition: width 0.35s ease;
   position: relative;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.1);
 }
 
 .sidebar.open {
-  width: 220px;
+  width: 250px;
 }
 
 .sidebar-toggle {
   position: absolute;
   right: -15px;
   top: 20px;
-  width: 30px;
-  height: 30px;
-  background-color: #1f2937;
+  width: 34px;
+  height: 34px;
+  background: #2563eb;
   color: white;
   text-align: center;
   cursor: pointer;
   font-size: 18px;
-  border-radius: 0 5px 5px 0;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  transition: background 0.25s;
+}
+.sidebar-toggle:hover {
+  background: #1d4ed8;
 }
 
 .sidebar-content {
-  padding: 15px;
+  padding: 18px;
   flex: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-content h3 {
-  margin-top: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 10px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 12px;
 }
 
 .sidebar-content button {
-  background: #3b82f6;
+  background: #2563eb;
   color: white;
   border: none;
-  border-radius: 6px;
-  padding: 6px 10px;
-  margin-bottom: 5px;
+  border-radius: 8px;
+  padding: 7px 12px;
+  margin-bottom: 6px;
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.2s;
+  font-size: 0.95rem;
+  transition: all 0.25s;
 }
-
 .sidebar-content button:hover {
-  background: #2563eb;
+  background: #1d4ed8;
+  transform: translateY(-1px);
 }
 
 .sidebar-content ul {
   list-style: none;
   padding: 0;
-  margin-top: 10px;
+  margin-top: 12px;
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
 }
 
 .sidebar-content li {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 6px;
-  border-radius: 6px;
+  padding: 9px 8px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.25s;
 }
-
 .sidebar-content li:hover {
-  background-color: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.15);
 }
-
 .sidebar-content li.active {
-  background-color: #2563eb;
+  background: #3b82f6;
   font-weight: bold;
 }
 
@@ -480,141 +506,122 @@ body, html {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 1rem;
-  background: #f5f7fa;
+  padding: 1.5rem;
+  background: #f9fafb;
 }
 
 .messages-container {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1.2rem;
   background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  border-radius: 16px;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.06);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
+  scrollbar-width: thin;
 }
 
 .message {
   display: flex;
-  align-items: flex-start;
-  max-width: 70%;
-  padding: 0.6rem 0.8rem;
-  border-radius: 12px;
-  gap: 0.5rem;
+  max-width: 75%;
+  padding: 0.8rem 1rem;
+  border-radius: 14px;
   word-break: break-word;
-  line-height: 1.4;
+  line-height: 1.5;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  animation: fadeIn 0.25s ease;
 }
 
 .ai-message {
-  background-color: #e0f2fe;
+  background: #e0f2fe;
   align-self: flex-start;
 }
 
 .user-message {
-  background-color: #d1f7c4;
+  background: #d1f7c4;
   align-self: flex-end;
 }
 
-.message-role_ai {
-  font-weight: 600;
-  color: #555;
-  align-self: flex-start;
-  white-space: nowrap;
-  text-align: right;
-  flex-shrink: 0;
-}
-
+.message-role_ai,
 .message-role_user {
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #555;
-  align-self: flex-end;
-  white-space: nowrap;
-  text-align: left;
-  flex-shrink: 0;
+  color: #666;
+  margin-top: 0.3rem;
+  opacity: 0.85;
 }
 
 .message-content pre {
   background: #f6f8fa;
   padding: 0.75rem;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow-x: auto;
   font-family: 'Fira Code', monospace;
-}
-
-.message-content h1, h2, h3 {
-  margin: 0.5em 0 0.3em;
-  font-weight: 700;
-}
-
-.message-content p {
-  margin: 0.3em 0;
+  font-size: 0.9rem;
 }
 
 /* ================== Input ================== */
 .input-container {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   margin-top: 1rem;
 }
 
 .chat-input {
   flex: 1;
-  padding: 0.7rem 1rem;
-  border-radius: 12px;
-  border: 1px solid #ccc;
+  padding: 0.8rem 1rem;
+  border-radius: 14px;
+  border: 1px solid #ddd;
   font-size: 1rem;
   outline: none;
-  transition: border 0.2s, box-shadow 0.2s;
+  transition: all 0.25s;
+  background: #fff;
 }
-
 .chat-input:focus {
   border-color: #3b82f6;
-  box-shadow: 0 0 5px rgba(59,130,246,0.3);
+  box-shadow: 0 0 6px rgba(59,130,246,0.35);
 }
 
 .btn-send, .btn-login {
-  padding: 0.7rem 1.2rem;
-  border-radius: 12px;
+  padding: 0.8rem 1.2rem;
+  border-radius: 14px;
   border: none;
-  background-color: #3b82f6;
+  background: #2563eb;
   color: white;
   cursor: pointer;
   font-weight: 600;
-  transition: background 0.2s;
+  transition: all 0.25s;
 }
-
 .btn-send:disabled {
-  background-color: #a5b4fc;
+  background: #93c5fd;
   cursor: not-allowed;
 }
-
 .btn-send:hover:not(:disabled),
 .btn-login:hover {
-  background-color: #2563eb;
+  background: #1d4ed8;
+  transform: translateY(-1px);
 }
 
 /* ================== Suggestions ================== */
 .suggestions-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
 }
-
 .suggestion-btn {
   padding: 0.5rem 1rem;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid #ccc;
-  background-color: #f0f0f0;
+  background: #f9f9f9;
   cursor: pointer;
   font-size: 0.9rem;
-  transition: background 0.2s, transform 0.1s;
+  transition: all 0.2s;
 }
-
 .suggestion-btn:hover {
-  background-color: #e0e0e0;
+  background: #f1f5f9;
   transform: translateY(-1px);
 }
 
@@ -625,36 +632,188 @@ body, html {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0,0,0,0.5);
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 999;
 }
-
 .modal-content {
-  background: white;
-  padding: 2rem;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  background: #d4e0e2;
+  padding: 1rem;
+  border-radius: 8px;
+  width: 70%;
+  height: 700px;
+  max-width: 420px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.25);
+  animation: fadeIn 0.3s ease;
 }
-
 .modal-buttons {
-  margin-top: 1rem;
+  margin-top: 1.2rem;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 0.8rem;
 }
-
 .btn-edit-username {
-  margin-left: 0.5rem;
-  padding: 0.3rem 0.6rem;
+  margin-left: 0.6rem;
+  padding: 0.35rem 0.7rem;
   font-size: 0.85rem;
 }
 
 /* ================== Hex Grid ================== */
 .hex-grid {
-  margin: 10px auto;
+  margin: 12px auto;
+}
+
+/* Message Layout */
+.message-block {
+  margin-bottom: 1rem;
+  text-align: left;
+}
+.message-date {
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #666;
+  margin: 0.5rem 0;
+}
+.message-wrapper {
+  display: flex;
+  flex-direction: column;
+  max-width: 75%;
+}
+.user-wrapper { align-items: flex-end; margin-left: auto; }
+.ai-wrapper { align-items: flex-start; margin-right: auto; }
+
+.message-author {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+  color: #2563eb;
+}
+.user-wrapper .message-author { color: #16a34a; }
+
+.message {
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+.user-message {
+  background: #d1f7c4;
+}
+.ai-message {
+  background: #e0f2fe;
+}
+.message-time {
+  font-size: 0.7rem;
+  color: #777;
+  margin-top: 0.3rem;
+}
+
+/* Archive fix */
+.archive-item {
+  background: #f9fafb;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.archive-item .chat-name {
+  color: #111;
+  font-weight: 500;
+}
+
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* Nazwa po lewej, przycisk po prawej */
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.chat-item.active {
+  background: #e5f3ff;
+}
+
+.chat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.chat-name {
+  cursor: pointer;
+  flex-grow: 1;
+}
+
+.chat-actions {
+  position: relative;
+}
+
+.dots-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+/* Dropdown styled like <select> options */
+.chat-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+  z-index: 20;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-menu button {
+  padding: 8px 12px;
+  text-align: left;
+  background: white;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.chat-menu button:hover {
+  background: #f0f0f0;
+}
+
+.chat-menu button.danger {
+  color: #dc2626;
+}
+
+.chat-menu button.cass {
+  color: #455355;
+}
+
+.chat-menu button.danger:hover {
+  background: #fee2e2;
+}
+
+.chat-list-container {
+  display: flex;
+  max-height: 83.75%; /* Cały sidebar maksymalnie 80% wysokości ekranu */
+  flex-grow: 1;
+  overflow-y: auto;
+  flex-direction: column;
+  scrollbar-width: thin;
+}
+/* ================== Animations ================== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>
