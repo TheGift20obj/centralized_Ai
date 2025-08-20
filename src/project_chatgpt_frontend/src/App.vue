@@ -15,8 +15,47 @@ import {
   tryPrompt,
   getRandomUserMessages,
   archiveChat,
+  askAiDraw,
+  updateImage,
 } from './main.js';
 import HexGrid from './HexGrid.vue';
+
+const ctxName = ref('Moja Grafika');
+const cols = ref(3);
+const rows = ref(3);
+
+function demoColorGetter(y, x) {
+  //if (y === x) return '#FF9900';
+  return '#E5E7EB'; // jasna szarość
+}
+
+function generateImageDescriptor(name, cols, rows, getColorAt) {
+  // helper losujący powtarzalny kolor dla (y,x), gdy nie podano getColorAt
+  const fallbackColor = (y, x) => {
+    // prosty determinizm: hasz z y,x
+    const seed = (y * 73856093) ^ (x * 19349663);
+    // trzy kanały z seed
+    const r = (seed & 0xff);
+    const g = ((seed >> 8) & 0xff);
+    const b = ((seed >> 16) & 0xff);
+    const toHex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+
+  const colorAt = typeof getColorAt === 'function' ? getColorAt : fallbackColor;
+
+  const lines = [];
+  lines.push(`Content: ${name}`);
+  lines.push(`Image:`);
+  for (let y = 1; y <= rows; y++) {
+    const rowParts = [];
+    for (let x = 1; x <= cols; x++) {
+      rowParts.push(`|y:${y},x:${x};${colorAt(y, x)}|`);
+    }
+    lines.push(rowParts.join(''));
+  }
+  return lines.join('');
+}
 
 const selectedModel = ref("Llama3_1_8B");
 
@@ -52,6 +91,7 @@ const userInput = ref('');
 const isLoggedIn = ref(false);
 const showSidebar = ref(false);
 const aiWriting = ref(false);
+const selectedMsg = ref(-1);
 const endOfMessages = ref(null);
 
 const chatList = ref([]);
@@ -67,6 +107,49 @@ const suggestions = ref([]);
 const showArchives = ref(false);
 const archives = ref([]);
 
+const showMessageBox = ref(false);
+let tempBackup = ''; // Kopia starego obrazka
+
+function applyEditedPixels(edited_pixels) {
+  if (selectedMsg.value < 0) return; // brak wybranego message
+  
+  // znajdź content obrazka w messages
+  const msg = messages.value[selectedMsg.value];
+  if (!msg || !msg.content) return;
+
+  let content = msg.content;
+
+  // dopasuj każdy pixel w formacie |y:1,x:1;#FF9900|
+  const regex = /\|y:(\d+),x:(\d+);(#?[0-9A-Fa-f]{6})\|/g;
+  let match;
+  while ((match = regex.exec(edited_pixels)) !== null) {
+    const y = match[1];
+    const x = match[2];
+    const color = match[3];
+
+    // regex do znalezienia danego pixela w oryginalnym message
+    const pixelRegex = new RegExp(`\\|y:${y},x:${x};#?[0-9A-Fa-f]{6}\\|`, "g");
+
+    // zamiana starego koloru na nowy
+    content = content.replace(pixelRegex, `|y:${y},x:${x};${color}|`);
+  }
+
+  // podmień content w messages
+  messages.value[selectedMsg.value].content = content;
+}
+
+const onGenerate = async () => {
+  const userMsg = { role: 'user', content: generateImageDescriptor(ctxName.value, cols.value, rows.value, demoColorGetter), etc: [Date.now(), cols.value, rows.value] };
+  const temp = userMsg.content;
+  messages.value.push(userMsg);
+  await addChatMessage(
+    loginStatus.principal,
+    currentChatId.value,
+    temp,
+    'user', cols.value, rows.value, Date.now()
+  );
+}
+
 const loadSuggestions = () => {
   suggestions.value = getRandomUserMessages();
 };
@@ -79,6 +162,8 @@ const archiveChatAction = async (chatId, archive) => {
   if (archive && currentChatId.value === chatId) {
     currentChatId.value = null;
     messages.value = [];
+    currentChatName.value = '';
+    selectedMsg.value = -1;
   }
   await loadChats();
 };
@@ -96,6 +181,7 @@ const openArchives = async () => {
 
 const openChat = async (chatId, msgLen) => {
   if (!loginStatus.loggedIn) return;
+  selectedMsg.value = -1;
   currentChatId.value = chatId;
   //currentChatName.value = name;
   const result = await getChatHistory(loginStatus.principal, chatId, msgLen);
@@ -121,6 +207,49 @@ const createChat = async () => {
   await createNewChat(loginStatus.principal, bytes, name);
   await loadChats();
   await openChat(bytes, 0);
+};
+
+const askAiDrawVue = async () => {
+  aiWriting.value = true;
+  const temp = userInput.value;
+  userInput.value = '';
+  try {
+    tempBackup = messages.value[selectedMsg.value]?.content || '';
+    const edited_pixels = await askAiDraw(temp, selectedModel.value, loginStatus.principal, currentChatId.value, selectedMsg.value);
+    applyEditedPixels(edited_pixels);
+    showMessageBox.value = true;
+    //const edit = messages.value[selectedMsg.value].content;
+    //await updateImage(loginStatus.principal, currentChatId.value, selectedMsg.value, edit);
+    aiWriting.value = false;
+  } catch (error) {
+    alert(error);
+    aiWriting.value = false;
+  }
+}
+
+const acceptChanges = async () => {
+  // Pobieramy nowy stan obrazu
+  const edit = messages.value[selectedMsg.value].content;
+
+  // Zapis na backend
+  await updateImage(
+    loginStatus.principal,
+    currentChatId.value,
+    selectedMsg.value,
+    edit
+  );
+
+  showMessageBox.value = false;
+};
+
+const redoChanges = () => {
+  // Przywracamy kopię starego obrazu
+  if (selectedMsg.value >= 0 && tempBackup) {
+    messages.value[selectedMsg.value].content = tempBackup;
+    applyEditedPixels(tempBackup); // odśwież frontend
+  }
+
+  showMessageBox.value = false;
 };
 
 const sendMessage = async () => {
@@ -172,6 +301,10 @@ const sendMessage = async () => {
   loadSuggestions();
 };
 
+const select_image = async (index) => {
+  selectedMsg.value = index;
+};
+
 const sendSuggestion = async (msg) => {
   userInput.value = msg;
   //await sendMessage();
@@ -188,6 +321,7 @@ const removeChat = async (chatId) => {
     messages.value = [];
     currentChatId.value = null;
     currentChatName.value = '';
+    selectedMsg.value = -1;
   }
 };
 
@@ -289,7 +423,20 @@ onMounted(async () => {
           <div v-if="msg.role === 'user'" class="message-wrapper user-wrapper">
             <div class="message-author">{{ loginStatus.username }}</div>
             <div class="message user-message">
-              <span class="message-content">{{ msg.content }}</span>
+              <template v-if="hasHex(msg.content)">
+                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" class="hex-grid"/>
+                <div v-if="selectedModel.includes('Image')">
+                  <div v-if="selectedMsg === index">
+                    <span>Selected</span>
+                  </div>
+                  <div v-else>
+                    <button @click="select_image(index)">Select</button>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <span class="message-content">{{ msg.content }}</span>
+              </template>
             </div>
             <div class="message-time">
               {{ new Date(Number(msg.etc[0])).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}
@@ -336,7 +483,7 @@ onMounted(async () => {
           class="chat-input"
           :disabled="aiWriting"
         />
-        <button @click="sendMessage" class="btn-send" :disabled="!currentChatId || aiWriting">
+        <button @click="sendMessage" class="btn-send" :disabled="!currentChatId || aiWriting || selectedModel.includes('Image')">
           Send
         </button>
       </section>
@@ -366,6 +513,14 @@ onMounted(async () => {
           <div v-if="selectedModel.includes('Image')" class="size-settings">
             <label>X:<input type="number" v-model.number="gridX" :min="8" :max="16"/></label>
             <label>Y:<input type="number" v-model.number="gridY" :min="8" :max="16"/></label>
+
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <input v-model="ctxName" placeholder="Nazwa (Context)" />
+              <input type="number" v-model.number="cols" min="1" placeholder="x (cols)" />
+              <input type="number" v-model.number="rows" min="1" placeholder="y (rows)" />
+              <button @click="onGenerate">Generate Empty Image</button>
+              <button v-if="selectedMsg >= 0" @click="askAiDrawVue" :disabled="aiWriting">Ask AI Draw</button>
+            </div>
           </div>
         </div>
       </section>
@@ -384,11 +539,28 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- Custom message box -->
+    <div v-if="showMessageBox" class="message-box">
+      <p>Do you want to apply AI changes?</p>
+      <button @click="acceptChanges">Accept</button>
+      <button @click="redoChanges">Redo</button>
+    </div>
   </div>
 </template>
 
 
 <style scoped>
+.message-box {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  border: 1px solid black;
+  padding: 16px;
+  z-index: 1000;
+}
 /* ================== Global ================== */
 body, html {
   margin: 0;
@@ -815,5 +987,26 @@ body, html {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+.btn-mic {
+  background: #374151;
+  border: none;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  margin-left: 6px;
+}
+
+.btn-mic.recording {
+  background: #ef4444; /* czerwone gdy nagrywa */
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239,68,68, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(239,68,68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68, 0); }
 }
 </style>

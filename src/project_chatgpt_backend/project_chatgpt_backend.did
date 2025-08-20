@@ -19,5 +19,7 @@ service : {
     rename_chat: (principal, vec nat8, text) -> (bool);
     list_chats: (principal, bool) -> (vec record { name: text; id: vec nat8; msg_len: nat32 }) query;
     archive_chat: (principal, vec nat8, bool) -> (bool);
+    askaidraw: (text, text, principal, vec nat8, nat32) -> (text);
+    update_image: (principal, vec nat8, nat32, text) -> ();
     "chat": (text, nat32, nat32, text, principal, vec nat8, nat32) -> (text);
 }

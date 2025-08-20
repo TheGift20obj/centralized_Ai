@@ -26,7 +26,7 @@ export const loginStatus = {
 };
 
 export const login = async () => {
-  /*loginStatus.loggedIn = true;
+  /*oginStatus.loggedIn = true;
   loginStatus.principal = Principal.fromText("aaaaa-aa");
   loginStatus.username = await getUserName(loginStatus.principal);*/
   const authClient = await AuthClient.create();
@@ -42,6 +42,14 @@ export const login = async () => {
     },
   });
 };
+
+export async function updateImage(principal, chatId, msgId, new_content) {
+  return await project_chatgpt_backend.update_image(principal, chatId, msgId, new_content);
+}
+
+export async function askAiDraw(query, tag, principal, chatId, msgId) {
+  return await project_chatgpt_backend.askaidraw(query, tag, principal, chatId, msgId);
+}
 
 export async function archiveChat(principal, chatId, archive) {
   return await project_chatgpt_backend.archive_chat(principal, chatId, archive);

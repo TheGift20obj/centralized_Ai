@@ -65,11 +65,46 @@ thread_local! {
         )
     );
 
-    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 32], [u8; 4096], (u64, u32, u32)), Memory>> = RefCell::new(
+    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 32], [u8; 4096], (u64, bool)), Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
         )
     );
+
+    static CHAT_IMAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 10240], (u32, u32)), Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5)))
+        )
+    );
+}
+
+pub fn update_image_content(
+    user: Principal,
+    chat_id: [u8; 16],
+    msg_id: u32,
+    new_content: &str,
+) -> Result<(), String> {
+    CHAT_IMAGES_STABLE.with(|map| {
+        let mut map = map.borrow_mut();
+        let key = ((user, chat_id), msg_id);
+
+        if let Some((_, meta)) = map.get(&key) {
+            // konwersja nowego contentu do [u8; 10240]
+            let bytes = new_content.as_bytes();
+            if bytes.len() > 10240 {
+                return Err("New content too large for buffer (max 10240 bytes)".to_string());
+            }
+
+            let mut buf = [0u8; 10240];
+            buf[..bytes.len()].copy_from_slice(bytes);
+
+            // wstawiamy z powrotem nową wartość z tym samym meta
+            map.insert(key, (buf, meta));
+            Ok(())
+        } else {
+            Err("Message not found".to_string())
+        }
+    })
 }
 
 fn set_chat_archived_stable(user: Principal, chat_id: [u8; 16], archived: bool) -> bool {
@@ -181,6 +216,21 @@ fn get_name_stable(principal: Principal) -> Option<[u8; 32]> {
     USER_NAMES_STABLE.with(|map| map.borrow().get(&principal))
 }
 
+fn get_image(key: ((Principal, [u8; 16]), u32)) -> Option<String> {
+    let image = CHAT_IMAGES_STABLE.with(|image_map| {
+        let image_map = image_map.borrow();
+            image_map.get(&key)
+    });
+
+    let ext_val = if let Some((context, (_, _))) = image {
+        Some(fixed_bytes_to_string(&context))
+    } else { 
+        None
+    };
+
+    ext_val
+}
+
 fn get_chats_for_user(user: Principal) -> Vec<ChatMeta> {
     USER_CHATS_STABLE.with(|map_ref| {
         let map = map_ref.borrow();
@@ -222,8 +272,21 @@ fn get_msgs_for_user(user: Principal, chat_id: [u8; 16], msg_count: u32) -> Chat
 
         for i in 0..msg_count {
             let key = ((user, chat_id.clone()), i);
-            if let Some((role, content, etc)) = map.get(&key) {
-                info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&role), content: fixed_bytes_to_string(&content), etc });
+            if let Some((role, content_m, etc_m)) = map.get(&key) {
+                let image = CHAT_IMAGES_STABLE.with(|image_map| {
+                    let image_map = image_map.borrow();
+                    image_map.get(&key)
+                });
+                let mut etc = (etc_m.0, 0, 0);
+                if etc_m.1 {
+                    if let Some((content_i, (cols, rows))) = image {
+                        etc.1 = cols;
+                        etc.2 = rows;
+                        info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&role), content: fixed_bytes_to_string(&content_i), etc });
+                    }
+                } else {
+                    info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&role), content: fixed_bytes_to_string(&content_m), etc });
+                }
             }
         }
 
@@ -247,6 +310,13 @@ fn delete_chat_stable(user: Principal, chat_id: [u8; 16]) -> bool {
                 .filter_map(|entry| {
                     let ((p, c), idx) = entry.key();
                     if *p == user && *c == chat_id {
+                        let (_role, _contend, (_timestap, image)) = entry.value();
+                        if image {
+                            CHAT_IMAGES_STABLE.with(|image_map| {
+                                let mut image_map = image_map.borrow_mut();
+                                image_map.remove(&((user, chat_id.clone()), *idx));
+                            })
+                        }
                         Some(((user, chat_id.clone()), *idx))
                     } else {
                         None
@@ -277,7 +347,9 @@ fn rename_chat_stable(user: Principal, chat_id: [u8; 16], new_name: String) -> b
 }
 
 fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, role: String, width: u32, height: u32, timestamp: u64) -> bool {
-    let etc = (timestamp, width, height);
+    let image = width>0 && height>0;
+    let etc = (timestamp, image);
+    let etc_image = (width, height);
     USER_CHATS_STABLE.with(|chat_map| {
         let mut chat_map = chat_map.borrow_mut();
         if let Some((name, msg_count)) = chat_map.get(&(user, chat_id.clone())) {
@@ -285,8 +357,15 @@ fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, 
             CHAT_MESSAGES_STABLE.with(|msg_map| {
                 msg_map
                     .borrow_mut()
-                    .insert(((user, chat_id.clone()), new_index), (string_to_fixed_bytes::<32>(&role), string_to_fixed_bytes::<4096>(content.as_str()), etc));
+                    .insert(((user, chat_id.clone()), new_index), (string_to_fixed_bytes::<32>(&role), string_to_fixed_bytes::<4096>(if etc.1 {""} else {content.as_str()}), etc));
             });
+            if etc.1 {
+                CHAT_IMAGES_STABLE.with(|msg_map| {
+                    msg_map
+                        .borrow_mut()
+                        .insert(((user, chat_id.clone()), new_index), (string_to_fixed_bytes::<10240>(content.as_str()), etc_image));
+                });
+            }
             chat_map.insert((user, chat_id.clone()), (name.clone(), new_index + 1));
             true
         } else {
@@ -295,11 +374,11 @@ fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, 
     })
 }
 
-thread_local! {
+/*thread_local! {
     static USER_CHATS: std::cell::RefCell<HashMap<Principal, HashMap<ChatId, ChatInfo>>> = std::cell::RefCell::new(HashMap::new());
     static USER_NAMES: std::cell::RefCell<HashMap<Principal, String>> = std::cell::RefCell::new(HashMap::new());
     static USER_PROMPTS: std::cell::RefCell<HashMap<Principal, (u32, Option<u64>)>> = std::cell::RefCell::new(HashMap::new());
-}
+}*/
 #[derive(Serialize, Deserialize)]
 struct OpenAIRequest {
     model: String,
@@ -310,6 +389,54 @@ struct OpenAIRequest {
 struct Message {
     role: String,
     content: String,
+}
+
+#[update]
+async fn askaidraw(query: String, tag: String, user: Principal, chat_id: [u8; 16], msg_id: u32) -> String {
+    let model = match tag.as_str() {
+        "Llama4Scout_Image" => {
+            Model::Llama4Scout
+        }
+        "Llama3_1_8B_Image" => {
+            Model::Llama3_1_8B
+        }
+        _ => {
+            Model::Llama3_1_8B
+        }
+    };
+
+    let key = ((user, chat_id), msg_id);
+    let image = get_image(key);
+    let mut messages = vec![];
+
+    messages.push(ChatMessage::System {
+        content: 
+            "You are an AI assistant that helps paint images step by step. \
+            Examine the provided image structure. Generate up to 100 pixels per step, \
+            returning each pixel strictly in the format |y:${y},x:${x};${#RRGGBB}|. \
+            Only output the pixel lines, without any explanations, comments, or extra text. \
+            Only update the pixels you generate in this step."
+            .to_string(),
+    });
+
+    if let Some(content) = image {
+        let cleaned = content.replace(char::is_whitespace, "");
+        if !cleaned.is_empty() {
+            messages.push(ChatMessage::User {
+                content: cleaned,
+            });
+        }
+    }
+
+    if !query.trim().is_empty() {
+        messages.push(ChatMessage::User {
+            content: query.clone(),
+        });
+    }
+
+    let builder = ChatBuilder::new(model).with_messages(messages.clone());
+    let response = builder.send().await;
+    response.message.content.unwrap_or("ERR".to_string())
 }
 
 #[update]
@@ -436,6 +563,11 @@ fn delete_chat(user: Principal, chat_id: [u8; 16]) -> bool {
 #[update]
 fn rename_chat(user: Principal, chat_id: [u8; 16], new_name: String) -> bool {
     rename_chat_stable(user, chat_id, new_name)
+}
+
+#[update]
+fn update_image(user: Principal, chat_id: [u8; 16], msg_id: u32, new_content: String) {
+    let _ = update_image_content(user, chat_id, msg_id, new_content.as_str());
 }
 
 #[query]
