@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ic_cdk::api::time;
 use ic_llm::{AssistantMessage, ChatBuilder, ChatMessage, Model};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap};
+use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableVec, StableLog, Storable};
 use std::cell::RefCell;
 //use ic_stable_structures::storable::Storable;
 //use ic_stable_structures::storable::Bound;
@@ -37,6 +37,57 @@ struct ChatInfo {
 
 type ChatId = [u8; 16];
 
+#[derive(Clone, Debug, CandidType, Deserialize)]
+struct StoredImage {
+    //owner: Principal,
+    width: u32,
+    height: u32,
+    data: Vec<u8>, // tu pakujesz swoje hashe/pixele
+}
+
+impl Storable for StoredImage {
+    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+        candid::encode_one(self).unwrap().into()
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).unwrap()
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        candid::encode_one(self).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Unbounded;
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+struct StoredMessage {
+    //owner: Principal,
+    role: [u8; 32],
+    data: Vec<u8>,
+    timestamp: u64,
+    image: bool,
+}
+
+impl Storable for StoredMessage {
+    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+        candid::encode_one(self).unwrap().into()
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).unwrap()
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        candid::encode_one(self).unwrap()
+    }
+
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Unbounded;
+}
+
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -65,13 +116,13 @@ thread_local! {
         )
     );
 
-    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 32], [u8; 4096], (u64, bool)), Memory>> = RefCell::new(
+    static CHAT_MESSAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), StoredMessage, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(3)))
         )
     );
 
-    static CHAT_IMAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), ([u8; 10240], (u32, u32)), Memory>> = RefCell::new(
+    static CHAT_IMAGES_STABLE: RefCell<StableBTreeMap<((Principal, [u8; 16]), u32), StoredImage, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(5)))
         )
@@ -88,18 +139,20 @@ pub fn update_image_content(
         let mut map = map.borrow_mut();
         let key = ((user, chat_id), msg_id);
 
-        if let Some((_, meta)) = map.get(&key) {
-            // konwersja nowego contentu do [u8; 10240]
-            let bytes = new_content.as_bytes();
-            if bytes.len() > 10240 {
-                return Err("New content too large for buffer (max 10240 bytes)".to_string());
-            }
+        if let Some(stored_image) = map.get(&key) {
+            let mut stored_copy = stored_image.clone();
+            // konwersja nowego contentu do [u8; 100000]
+            /*let bytes = new_content.as_bytes();
+            if bytes.len() > 100000 {
+                return Err("New content too large for buffer (max 100000 bytes)".to_string());
+            }*/
+            stored_copy.data = string_to_bytes(new_content);
 
-            let mut buf = [0u8; 10240];
-            buf[..bytes.len()].copy_from_slice(bytes);
+            /*let mut buf = [0u8; 100000];
+            buf[..bytes.len()].copy_from_slice(bytes);*/
 
             // wstawiamy z powrotem nową wartość z tym samym meta
-            map.insert(key, (buf, meta));
+            map.insert(key, stored_copy);
             Ok(())
         } else {
             Err("Message not found".to_string())
@@ -158,7 +211,9 @@ fn bytes_to_option_f64(bytes: &[u8; 9]) -> Option<u64> {
         _ => None, // albo panic!("Invalid Option encoding")
     }
 }
-
+fn string_to_bytes(s: &str) -> Vec<u8> {
+    s.as_bytes().to_vec()
+}
 fn string_to_fixed_bytes<const N: usize>(s: &str) -> [u8; N] {
     let mut arr = [0u8; N];
     let bytes = s.as_bytes();
@@ -222,8 +277,8 @@ fn get_image(key: ((Principal, [u8; 16]), u32)) -> Option<String> {
             image_map.get(&key)
     });
 
-    let ext_val = if let Some((context, (_, _))) = image {
-        Some(fixed_bytes_to_string(&context))
+    let ext_val = if let Some(stored_image) = image {
+        Some(fixed_bytes_to_string(&stored_image.data))
     } else { 
         None
     };
@@ -272,20 +327,20 @@ fn get_msgs_for_user(user: Principal, chat_id: [u8; 16], msg_count: u32) -> Chat
 
         for i in 0..msg_count {
             let key = ((user, chat_id.clone()), i);
-            if let Some((role, content_m, etc_m)) = map.get(&key) {
+            if let Some(stored_message) = map.get(&key) {
                 let image = CHAT_IMAGES_STABLE.with(|image_map| {
                     let image_map = image_map.borrow();
                     image_map.get(&key)
                 });
-                let mut etc = (etc_m.0, 0, 0);
-                if etc_m.1 {
-                    if let Some((content_i, (cols, rows))) = image {
-                        etc.1 = cols;
-                        etc.2 = rows;
-                        info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&role), content: fixed_bytes_to_string(&content_i), etc });
+                let mut etc = (stored_message.timestamp, 0, 0);
+                if stored_message.image {
+                    if let Some(stable_image) = image {
+                        etc.1 = stable_image.width;
+                        etc.2 = stable_image.height;
+                        info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&stored_message.role), content: fixed_bytes_to_string(&stable_image.data), etc });
                     }
                 } else {
-                    info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&role), content: fixed_bytes_to_string(&content_m), etc });
+                    info.messages.push(ChatMessageIC { role: fixed_bytes_to_string(&stored_message.role), content: fixed_bytes_to_string(&stored_message.data), etc });
                 }
             }
         }
@@ -310,8 +365,8 @@ fn delete_chat_stable(user: Principal, chat_id: [u8; 16]) -> bool {
                 .filter_map(|entry| {
                     let ((p, c), idx) = entry.key();
                     if *p == user && *c == chat_id {
-                        let (_role, _contend, (_timestap, image)) = entry.value();
-                        if image {
+                        let storable_message = entry.value();
+                        if storable_message.image {
                             CHAT_IMAGES_STABLE.with(|image_map| {
                                 let mut image_map = image_map.borrow_mut();
                                 image_map.remove(&((user, chat_id.clone()), *idx));
@@ -355,15 +410,28 @@ fn add_chat_message_stable(user: Principal, chat_id: [u8; 16], content: String, 
         if let Some((name, msg_count)) = chat_map.get(&(user, chat_id.clone())) {
             let new_index = msg_count;
             CHAT_MESSAGES_STABLE.with(|msg_map| {
+                let stable_msg = StoredMessage {
+                    //owner: user,
+                    role: string_to_fixed_bytes::<32>(&role),
+                    data: string_to_bytes(if etc.1 {""} else {content.as_str()}),
+                    timestamp: etc.0,
+                    image: etc.1,
+                };
                 msg_map
                     .borrow_mut()
-                    .insert(((user, chat_id.clone()), new_index), (string_to_fixed_bytes::<32>(&role), string_to_fixed_bytes::<4096>(if etc.1 {""} else {content.as_str()}), etc));
+                    .insert(((user, chat_id.clone()), new_index), stable_msg);
             });
             if etc.1 {
                 CHAT_IMAGES_STABLE.with(|msg_map| {
+                    let etc_image = StoredImage {
+                        //owner: user,
+                        width: etc_image.0,
+                        height: etc_image.1,
+                        data: string_to_bytes(content.as_str()),
+                    };
                     msg_map
                         .borrow_mut()
-                        .insert(((user, chat_id.clone()), new_index), (string_to_fixed_bytes::<10240>(content.as_str()), etc_image));
+                        .insert(((user, chat_id.clone()), new_index), etc_image);
                 });
             }
             chat_map.insert((user, chat_id.clone()), (name.clone(), new_index + 1));
@@ -392,7 +460,7 @@ struct Message {
 }
 
 #[update]
-async fn askaidraw(query: String, tag: String, user: Principal, chat_id: [u8; 16], msg_id: u32) -> String {
+async fn askaidraw(query: String, tag: String, msg_content: String) -> String {
     let model = match tag.as_str() {
         "Llama4Scout_Image" => {
             Model::Llama4Scout
@@ -405,8 +473,8 @@ async fn askaidraw(query: String, tag: String, user: Principal, chat_id: [u8; 16
         }
     };
 
-    let key = ((user, chat_id), msg_id);
-    let image = get_image(key);
+    //let key = ((user, chat_id), msg_id);
+    let image = Some(msg_content);
     let mut messages = vec![];
 
     messages.push(ChatMessage::System {
@@ -422,9 +490,7 @@ async fn askaidraw(query: String, tag: String, user: Principal, chat_id: [u8; 16
     if let Some(content) = image {
         let cleaned = content.replace(char::is_whitespace, "");
         if !cleaned.is_empty() {
-            messages.push(ChatMessage::User {
-                content: cleaned,
-            });
+            messages.push(ChatMessage::User { content: cleaned, });
         }
     }
 

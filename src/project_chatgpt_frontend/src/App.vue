@@ -97,6 +97,8 @@ const endOfMessages = ref(null);
 const chatList = ref([]);
 const currentChatId = ref(null);
 const currentChatName = ref('');
+const minX = ref(0);
+const minY = ref(0);
 
 const showUsernameModal = ref(false);
 const tempUsername = ref('');
@@ -106,9 +108,63 @@ const suggestions = ref([]);
 
 const showArchives = ref(false);
 const archives = ref([]);
+const cropedValue = ref('');
 
 const showMessageBox = ref(false);
 let tempBackup = ''; // Kopia starego obrazka
+
+function cropStringImage(imageStr, rect) {
+  // Wyciągamy nazwę
+  const nameMatch = imageStr.match(/Content:\s*(.*)\nImage:/);
+  const name = nameMatch ? nameMatch[1].trim() : "Unnamed";
+
+  // Wyciągamy tylko część z obrazem
+  const imageMatch = imageStr.match(/Image:\s*([\s\S]*)$/);
+  const imageData = imageMatch ? imageMatch[1] : "";
+
+  const regex = /\|y:(\d+),x:(\d+);(#?[0-9A-Fa-f]{6})\|/g;
+  let match;
+  const result = [];
+
+  minX.value = rect.x2;
+  minY.value = rect.y2;
+
+  // nagłówek
+  result.push(`Content: ${name}\nImage:\n`);
+
+  while ((match = regex.exec(imageData)) !== null) {
+    const y = parseInt(match[1]);
+    const x = parseInt(match[2]);
+    const color = match[3];
+
+    if (x >= rect.x2 && x <= rect.x1 && y >= rect.y2 && y <= rect.y1) {
+      const shiftedX = x - minX.value;
+      const shiftedY = y - minY.value;
+      result.push(`|y:${shiftedY},x:${shiftedX};${color}|`);
+    }
+  }
+
+  return result.join('');
+}
+
+const handleSelectCell = ({ x, y }) => {
+  const msg = `(x:${x-minX.value} layer, y:${y-minY.value} layer)`;
+  //const msg2 = `(x:${minX.value} layer, y:${minY.value} layer)`;
+  userInput.value += " " + msg;
+};
+
+const handleSelectRect = (rect) => {
+  if (!rect) {
+    console.warn('rect is undefined!');
+    return;
+  }
+  if (selectedMsg.value < 0) return;
+  const msg = messages.value[selectedMsg.value];
+  if (!msg || !msg.content) return;
+  const content = msg.content;
+  const { x1, y1, x2, y2 } = rect;
+  cropedValue.value = cropStringImage(content, { x1, y1, x2, y2 });
+};
 
 function applyEditedPixels(edited_pixels) {
   if (selectedMsg.value < 0) return; // brak wybranego message
@@ -123,8 +179,8 @@ function applyEditedPixels(edited_pixels) {
   const regex = /\|y:(\d+),x:(\d+);(#?[0-9A-Fa-f]{6})\|/g;
   let match;
   while ((match = regex.exec(edited_pixels)) !== null) {
-    const y = match[1];
-    const x = match[2];
+    const y = parseInt(match[1]) + minY.value;
+    const x = parseInt(match[2]) + minX.value;
     const color = match[3];
 
     // regex do znalezienia danego pixela w oryginalnym message
@@ -215,7 +271,7 @@ const askAiDrawVue = async () => {
   userInput.value = '';
   try {
     tempBackup = messages.value[selectedMsg.value]?.content || '';
-    const edited_pixels = await askAiDraw(temp, selectedModel.value, loginStatus.principal, currentChatId.value, selectedMsg.value);
+    const edited_pixels = await askAiDraw(temp, selectedModel.value, cropedValue.value);
     applyEditedPixels(edited_pixels);
     showMessageBox.value = true;
     //const edit = messages.value[selectedMsg.value].content;
@@ -246,7 +302,7 @@ const redoChanges = () => {
   // Przywracamy kopię starego obrazu
   if (selectedMsg.value >= 0 && tempBackup) {
     messages.value[selectedMsg.value].content = tempBackup;
-    applyEditedPixels(tempBackup); // odśwież frontend
+    //applyEditedPixels(tempBackup); // odśwież frontend
   }
 
   showMessageBox.value = false;
@@ -424,7 +480,7 @@ onMounted(async () => {
             <div class="message-author">{{ loginStatus.username }}</div>
             <div class="message user-message">
               <template v-if="hasHex(msg.content)">
-                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" class="hex-grid"/>
+                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" @selectCell="handleSelectCell" @selectArea="handleSelectRect" class="hex-grid" :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2] }"/>
                 <div v-if="selectedModel.includes('Image')">
                   <div v-if="selectedMsg === index">
                     <span>Selected</span>
@@ -448,7 +504,7 @@ onMounted(async () => {
             <div class="message-author">AI</div>
             <div class="message ai-message">
               <template v-if="hasHex(msg.content)">
-                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" class="hex-grid"/>
+                <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" @selectCell="handleSelectCell" class="hex-grid" :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2] }"/>
               </template>
               <template v-else>
                 <span class="message-content" v-html="formatMarkdown(msg.content)"></span>
@@ -836,6 +892,12 @@ body, html {
 /* ================== Hex Grid ================== */
 .hex-grid {
   margin: 12px auto;
+  width: 100%;                 /* pełna szerokość rodzica */
+  height: 100%;                /* pełna wysokość rodzica */
+  display: block;
+  aspect-ratio: attr(grid-cols) / attr(grid-rows); /* zachowaj proporcje */
+  max-width: 100%;
+  max-height: 100%;
 }
 
 /* Message Layout */

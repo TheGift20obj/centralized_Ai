@@ -26,10 +26,10 @@ export const loginStatus = {
 };
 
 export const login = async () => {
-  /*oginStatus.loggedIn = true;
+  loginStatus.loggedIn = true;
   loginStatus.principal = Principal.fromText("aaaaa-aa");
-  loginStatus.username = await getUserName(loginStatus.principal);*/
-  const authClient = await AuthClient.create();
+  loginStatus.username = await getUserName(loginStatus.principal);
+  /*const authClient = await AuthClient.create();
 
   await authClient.login({
     identityProvider: "https://identity.ic0.app/#authorize",
@@ -40,15 +40,15 @@ export const login = async () => {
       loginStatus.principal = principal;
       loginStatus.username = await getUserName(loginStatus.principal);
     },
-  });
+  });*/
 };
 
 export async function updateImage(principal, chatId, msgId, new_content) {
   return await project_chatgpt_backend.update_image(principal, chatId, msgId, new_content);
 }
 
-export async function askAiDraw(query, tag, principal, chatId, msgId) {
-  return await project_chatgpt_backend.askaidraw(query, tag, principal, chatId, msgId);
+export async function askAiDraw(query, tag, msg) {
+  return await project_chatgpt_backend.askaidraw(query, tag, msg);
 }
 
 export async function archiveChat(principal, chatId, archive) {
