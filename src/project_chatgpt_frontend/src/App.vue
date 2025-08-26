@@ -493,7 +493,7 @@ async function rearchiveChatAction(id, archive) {
       v-if="showSearch"
       class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
     >
-      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative">
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative flex flex-col">
         <h2 class="text-lg font-semibold mb-4">Search</h2>
         <input
           v-model="searchQuery"
@@ -501,65 +501,65 @@ async function rearchiveChatAction(id, archive) {
           placeholder="Type to search..."
           class="w-full bg-gray-800 border border-gray-700 p-2 rounded mb-4 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <section class="flex-1 min-h-0 overflow-y-auto pr-1">
+          <ul class="space-y-1">
+            <li
+              v-for="chat in filteredChats"
+              :key="chat.id"
+              :class="[
+                'p-2 rounded cursor-pointer hover:bg-gray-800 flex justify-between items-center',
+                chat.id === current ? 'bg-gray-700 text-white' : 'text-gray-200'
+              ]"
+            >
+              <span 
+                class="truncate flex-1" 
+                @click="openChat(chat.id)"
+              >
+              {{ chat.name }}
+              </span>
+              <!-- Actions -->
+              <div class="relative">
+                <button 
+                  class="px-2 py-1 rounded hover:bg-gray-700" 
+                  @click="showMenu = showMenu === chat.id ? null : chat.id"
+                >
+                ⋮
+                </button>
+
+                <!-- Dropdown -->
+                <div 
+                    v-if="showMenu === chat.id" 
+                    class="absolute right-0 mt-1 w-40 bg-gray-800 rounded shadow-lg z-10"
+                >
+                  <button 
+                    @click="renameChatPrompt(chat.id, chat.name)" 
+                    class="block w-full text-left px-3 py-2 hover:bg-gray-700"
+                  >
+                  ✏️&nbsp;Rename
+                  </button>
+                  <button 
+                    @click="archiveChatAction(chat.id, true)" 
+                    class="block w-full text-left px-3 py-2 hover:bg-gray-700"
+                  >
+                  📦&nbsp;Archive
+                  </button>
+                  <button 
+                    @click="removeChat(chat.id)" 
+                    class="block w-full text-left px-3 py-2 text-red-400 hover:bg-gray-700"
+                  >
+                  🗑️&nbsp;Delete
+                  </button>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
         <button
           class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"
           @click="closeAll"
         >
           ✖
         </button>
-
-        <!-- Lista dopasowanych chatów -->
-        <ul class="space-y-1">
-          <li
-            v-for="chat in filteredChats"
-            :key="chat.id"
-            :class="[
-              'p-2 rounded cursor-pointer hover:bg-gray-800 flex justify-between items-center',
-              chat.id === current ? 'bg-gray-700 text-white' : 'text-gray-200'
-            ]"
-          >
-            <span 
-              class="truncate flex-1" 
-              @click="openChat(chat.id)"
-            >
-            {{ chat.name }}
-            </span>
-            <!-- Actions -->
-            <div class="relative">
-              <button 
-                class="px-2 py-1 rounded hover:bg-gray-700" 
-                @click="showMenu = showMenu === chat.id ? null : chat.id"
-              >
-              ⋮
-              </button>
-
-              <!-- Dropdown -->
-              <div 
-                  v-if="showMenu === chat.id" 
-                  class="absolute right-0 mt-1 w-40 bg-gray-800 rounded shadow-lg z-10"
-              >
-                <button 
-                  @click="renameChatPrompt(chat.id, chat.name)" 
-                  class="block w-full text-left px-3 py-2 hover:bg-gray-700"
-                >
-                ✏️&nbsp;Rename
-                </button>
-                <button 
-                  @click="archiveChatAction(chat.id, true)" 
-                  class="block w-full text-left px-3 py-2 hover:bg-gray-700"
-                >
-                📦&nbsp;Archive
-                </button>
-                <button 
-                  @click="removeChat(chat.id)" 
-                  class="block w-full text-left px-3 py-2 text-red-400 hover:bg-gray-700"
-                >
-                🗑️&nbsp;Delete
-                </button>
-              </div>
-            </div>
-          </li>
-        </ul>
       </div>
     </div>
 
@@ -568,35 +568,36 @@ async function rearchiveChatAction(id, archive) {
       v-if="showLibrary"
       class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
     >
-      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-5/6 h-5/6 p-6 relative overflow-y-auto">
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-5/6 h-5/6 p-6 relative flex flex-col">
         <h2 class="text-lg font-semibold mb-4">Library</h2>
 
-        <!-- GRID -->
-        <div
-          v-if="images.length"
-          class="grid gap-4"
-          :style="{
-            gridTemplateColumns: 'repeat(' + gridCols + ', minmax(0, 1fr))',
-            gridAutoRows: 'minmax(150px, auto)'
-          }"
-        >
+        <section class="flex-1 min-h-0 overflow-y-auto pr-1">
+          <!-- GRID -->
           <div
-            v-for="(msg, index) in images"
-            :key="index"
-            class="bg-gray-800 rounded-xl p-2 flex items-center justify-center"
+            v-if="images.length"
+            class="grid gap-4"
+            :style="{
+              gridTemplateColumns: 'repeat(' + gridCols + ', minmax(0, 1fr))',
+              gridAutoRows: 'minmax(150px, auto)'
+            }"
           >
-            <!-- użycie HexGrid -->
-            <HexGrid
-              v-if="hasHex(msg.image)"
-              :content="msg.image"
-              :grid-cols="msg.etc[1]"
-              :grid-rows="msg.etc[2]"
-              :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2], width: '100%' }"
-            />
+            <div
+              v-for="(msg, index) in images"
+              :key="index"
+              class="bg-gray-800 rounded-xl p-2 flex items-center justify-center"
+            >
+              <!-- użycie HexGrid -->
+              <HexGrid
+                v-if="hasHex(msg.image)"
+                :content="msg.image"
+                :grid-cols="msg.etc[1]"
+                :grid-rows="msg.etc[2]"
+                :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2], width: '100%' }"
+              />
+            </div>
           </div>
-        </div>
-
-        <p v-else class="text-gray-400">No images found.</p>
+          <p v-else class="text-gray-400">No images found.</p>
+        </section>
 
         <button
           class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"

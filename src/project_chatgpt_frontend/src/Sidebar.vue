@@ -184,6 +184,10 @@ const showMenu = ref(null);
 // Methods
 function toggleSidebar() {
   isOpen.value = !isOpen.value
+  if (!isOpen.value) {
+    showUserMenu.value = false
+    showMenu.value = null
+  }
 }
 
 function toggleUserMenu() {

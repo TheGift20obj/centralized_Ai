@@ -99,9 +99,13 @@ export const login = async () => {
     onSuccess: async () => {
       const identity = authClient.getIdentity();
       const principal = identity.getPrincipal();
-      loginStatus.loggedIn = true;
-      loginStatus.principal = principal;
-      loginStatus.username = await getUserName(loginStatus.principal);
+      loginStatus.value.loggedIn = true;
+      loginStatus.value.principal = principal;
+      loginStatus.value.username = await getUserName(loginStatus.value.principal);
+      alert("Logged in as " + loginStatus.value.username);
+    },
+    onError: (err) => {
+      alert("Login failed: " + err);
     },
   });
   await load();
@@ -124,6 +128,9 @@ export const rename = async (new_username) => {
 };
 
 export const chat = async (message, tag) => {
+  if (current.value === null) {
+    await create();
+  }
   try {
     const size = (messages.value.length > 7) ? 7 : messages.value.length;
     const history = messages.value.slice(-size).map(msg => [msg.role, msg.content]);
@@ -242,6 +249,7 @@ export const create = async () => {
   const name = `New Chat ${chats.value.length + 1}`;
   await project_chatgpt_backend.create_new_chat(loginStatus.value.principal, bytes, name);
   await load();
+  current.value = bytes;
 }
 
 export const remove_chat = async (id) => {
