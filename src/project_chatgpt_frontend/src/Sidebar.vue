@@ -90,25 +90,25 @@
                             <!-- Dropdown -->
                             <div 
                                 v-if="showMenu === chat.id" 
-                                class="absolute right-0 mt-1 w-32 bg-gray-800 rounded shadow-lg z-10"
+                                class="absolute right-0 mt-1 w-40 bg-gray-800 rounded shadow-lg z-10"
                             >
                                 <button 
                                 @click="renameChatPrompt(chat.id, chat.name)" 
                                 class="block w-full text-left px-3 py-2 hover:bg-gray-700"
                                 >
-                                ✏️ Rename
+                                ✏️&nbsp;Rename
                                 </button>
                                 <button 
                                 @click="archiveChatAction(chat.id, true)" 
                                 class="block w-full text-left px-3 py-2 hover:bg-gray-700"
                                 >
-                                📦 Archive
+                                📦&nbsp;Archive
                                 </button>
                                 <button 
                                 @click="removeChat(chat.id)" 
                                 class="block w-full text-left px-3 py-2 text-red-400 hover:bg-gray-700"
                                 >
-                                🗑️ Delete
+                                🗑️&nbsp;Delete
                                 </button>
                             </div>
                         </div>
@@ -176,7 +176,7 @@ import { ref } from 'vue'
 import { loginStatus, login, logout, rename, chats, create, open, current, rename_chat, remove_chat, archive_chat } from './main.js'
 
 // Sidebar state
-const isOpen = ref(true)
+const isOpen = ref(false)
 const showUserMenu = ref(false)
 
 const showMenu = ref(null);
@@ -187,6 +187,7 @@ function toggleSidebar() {
 }
 
 function toggleUserMenu() {
+  isOpen.value = true
   showUserMenu.value = !showUserMenu.value
 }
 

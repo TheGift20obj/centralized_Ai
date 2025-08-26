@@ -320,6 +320,44 @@ fn get_archives_for_user(user: Principal) -> Vec<ChatMeta> {
     })
 }
 
+fn get_all_images_for_user(user: Principal) -> ChatInfo {
+    let mut info = ChatInfo { messages: Vec::new() };
+
+    USER_CHATS_STABLE.with(|chat_map_ref| {
+        let chat_map = chat_map_ref.borrow();
+
+        for entry in chat_map.iter() {
+            let (p, chat_id) = entry.key();
+            let (_name, msg_count) = entry.value();
+
+            if *p != user {
+                continue;
+            }
+
+            // przechodzimy po wszystkich wiadomościach w czacie
+            for msg_id in 0..msg_count {
+                let key = ((user, chat_id.clone()), msg_id);
+
+                CHAT_IMAGES_STABLE.with(|image_map_ref| {
+                    let image_map = image_map_ref.borrow();
+
+                    if let Some(stored_image) = image_map.get(&key) {
+                        // budujemy ChatMessageIC dla obrazu
+                        let msg = ChatMessageIC {
+                            role: "image".to_string(), // możesz tu wstawić np. "assistant" jeśli chcesz
+                            content: fixed_bytes_to_string(&stored_image.data),
+                            etc: (0, stored_image.width, stored_image.height), // timestamp = 0, szer./wys. z obrazu
+                        };
+                        info.messages.push(msg);
+                    }
+                });
+            }
+        }
+    });
+
+    info
+}
+
 fn get_msgs_for_user(user: Principal, chat_id: [u8; 16], msg_count: u32) -> ChatInfo {
     CHAT_MESSAGES_STABLE.with(|map_ref| {
         let map = map_ref.borrow();
@@ -608,4 +646,9 @@ pub fn try_increment_user_prompt(user: Principal) -> bool {
 #[update]
 fn archive_chat(user: Principal, chat_id: [u8; 16], archive: bool) -> bool {
     set_chat_archived_stable(user, chat_id, archive)
+}
+
+#[query]
+fn get_all_images(user: Principal) -> ChatInfo {
+    get_all_images_for_user(user)
 }

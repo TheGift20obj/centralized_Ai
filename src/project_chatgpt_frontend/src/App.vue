@@ -1,12 +1,44 @@
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue';
+import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import {
   archives, archive_chat,
   load,
-  load_archives
+  load_archives,
+  chats, open, remove_chat, rename_chat, current,
+  load_images, images
 } from './main.js';
 import Sidebar from './Sidebar.vue';
 import Chat from './Chat.vue';
+import HexGrid from './HexGrid.vue';
+
+const showMenu = ref(null);
+
+const filteredChats = computed(() => {
+  if (!searchQuery.value) return chats.value;
+  return chats.value.filter(chat =>
+    chat.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+  );
+});
+
+async function renameChatPrompt(id, oldName) {
+  const newName = prompt("Enter new chat name:", oldName)
+  if (newName && newName !== oldName) {
+    await rename_chat(id, newName)
+  }
+  showMenu.value = null
+}
+
+async function archiveChatAction(id, archive) {
+  await archive_chat(id, archive)
+  showMenu.value = null
+}
+
+async function removeChat(id) {
+  if (confirm("Are you sure you want to delete this chat? This action cannot be undone.")) {
+    await remove_chat(id)
+  }
+  showMenu.value = null
+}
 
 /*
 const ctxName = ref('Moja Grafika');
@@ -393,12 +425,19 @@ const showSearch = ref(false)
 const showLibrary = ref(false)
 const showArchives = ref(false)
 
+const searchQuery = ref('');
+
+async function openChat(id) {
+  await open(id)
+}
+
 function search() {
   showSearch.value = true
   showLibrary.value = false
   showArchives.value = false
 }
-function openLibrary() {
+async function openLibrary() {
+  await load_images()
   showLibrary.value = true
   showSearch.value = false
   showArchives.value = false
@@ -413,11 +452,28 @@ function closeAll() {
   showSearch.value = false
   showLibrary.value = false
   showArchives.value = false
+  searchQuery.value = '';
 }
 
-async function archiveChatAction(id, archive) {
+const gridCols = computed(() => {
+  if (images.value.length <= 2) return images.value.length;
+  if (images.value.length <= 4) return 2;
+  if (images.value.length <= 9) return 3;
+  if (images.value.length <= 16) return 4;
+  return 5; // dla dużej liczby
+});
+
+function hasHex(content) {
+  // sprawdzamy czy w tekście jest co najmniej jeden #RRGGBB
+  const hexRegex = /#[0-9A-Fa-f]{6}/g;
+  return hexRegex.test(content);
+}
+
+
+async function rearchiveChatAction(id, archive) {
   await archive_chat(id, archive)
   await load_archives()
+  await load()
 }
 </script>
 
@@ -440,6 +496,7 @@ async function archiveChatAction(id, archive) {
       <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative">
         <h2 class="text-lg font-semibold mb-4">Search</h2>
         <input
+          v-model="searchQuery"
           type="text"
           placeholder="Type to search..."
           class="w-full bg-gray-800 border border-gray-700 p-2 rounded mb-4 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -450,6 +507,59 @@ async function archiveChatAction(id, archive) {
         >
           ✖
         </button>
+
+        <!-- Lista dopasowanych chatów -->
+        <ul class="space-y-1">
+          <li
+            v-for="chat in filteredChats"
+            :key="chat.id"
+            :class="[
+              'p-2 rounded cursor-pointer hover:bg-gray-800 flex justify-between items-center',
+              chat.id === current ? 'bg-gray-700 text-white' : 'text-gray-200'
+            ]"
+          >
+            <span 
+              class="truncate flex-1" 
+              @click="openChat(chat.id)"
+            >
+            {{ chat.name }}
+            </span>
+            <!-- Actions -->
+            <div class="relative">
+              <button 
+                class="px-2 py-1 rounded hover:bg-gray-700" 
+                @click="showMenu = showMenu === chat.id ? null : chat.id"
+              >
+              ⋮
+              </button>
+
+              <!-- Dropdown -->
+              <div 
+                  v-if="showMenu === chat.id" 
+                  class="absolute right-0 mt-1 w-40 bg-gray-800 rounded shadow-lg z-10"
+              >
+                <button 
+                  @click="renameChatPrompt(chat.id, chat.name)" 
+                  class="block w-full text-left px-3 py-2 hover:bg-gray-700"
+                >
+                ✏️&nbsp;Rename
+                </button>
+                <button 
+                  @click="archiveChatAction(chat.id, true)" 
+                  class="block w-full text-left px-3 py-2 hover:bg-gray-700"
+                >
+                📦&nbsp;Archive
+                </button>
+                <button 
+                  @click="removeChat(chat.id)" 
+                  class="block w-full text-left px-3 py-2 text-red-400 hover:bg-gray-700"
+                >
+                🗑️&nbsp;Delete
+                </button>
+              </div>
+            </div>
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -458,9 +568,36 @@ async function archiveChatAction(id, archive) {
       v-if="showLibrary"
       class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
     >
-      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative">
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-5/6 h-5/6 p-6 relative overflow-y-auto">
         <h2 class="text-lg font-semibold mb-4">Library</h2>
-        <p class="text-gray-300">Here you can see your saved documents or resources.</p>
+
+        <!-- GRID -->
+        <div
+          v-if="images.length"
+          class="grid gap-4"
+          :style="{
+            gridTemplateColumns: 'repeat(' + gridCols + ', minmax(0, 1fr))',
+            gridAutoRows: 'minmax(150px, auto)'
+          }"
+        >
+          <div
+            v-for="(msg, index) in images"
+            :key="index"
+            class="bg-gray-800 rounded-xl p-2 flex items-center justify-center"
+          >
+            <!-- użycie HexGrid -->
+            <HexGrid
+              v-if="hasHex(msg.image)"
+              :content="msg.image"
+              :grid-cols="msg.etc[1]"
+              :grid-rows="msg.etc[2]"
+              :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2], width: '100%' }"
+            />
+          </div>
+        </div>
+
+        <p v-else class="text-gray-400">No images found.</p>
+
         <button
           class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"
           @click="closeAll"
@@ -487,7 +624,7 @@ async function archiveChatAction(id, archive) {
             >
               <span class="truncate flex-1">{{ chat.name }}</span>
               <button
-                @click="archiveChatAction(chat.id, false)"
+                @click="rearchiveChatAction(chat.id, false)"
                 class="px-2 py-1 rounded hover:bg-gray-700"
               >
                 Restore
@@ -718,471 +855,4 @@ async function archiveChatAction(id, archive) {
   </div>
 </template>
 */
-.message-box {
-  position: absolute;
-  top: 20%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: white;
-  border: 1px solid black;
-  padding: 16px;
-  z-index: 1000;
-}
-/* ================== Global ================== */
-body, html {
-  margin: 0;
-  padding: 0;
-  font-family: 'Inter', sans-serif;
-  background: linear-gradient(135deg, #eef2f3, #dfe9f3);
-  color: #333;
-  height: 100%;
-  overflow: hidden;
-}
-
-.app-wrapper {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-}
-
-/* ================== Sidebar ================== */
-.sidebar {
-  width: 60px;
-  background: rgba(31, 41, 55, 0.9);
-  backdrop-filter: blur(8px);
-  color: #fff;
-  transition: width 0.35s ease;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid rgba(255,255,255,0.1);
-}
-
-.sidebar.open {
-  width: 250px;
-}
-
-.sidebar-toggle {
-  position: absolute;
-  right: -15px;
-  top: 20px;
-  width: 34px;
-  height: 34px;
-  background: #2563eb;
-  color: white;
-  text-align: center;
-  cursor: pointer;
-  font-size: 18px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  transition: background 0.25s;
-}
-.sidebar-toggle:hover {
-  background: #1d4ed8;
-}
-
-.sidebar-content {
-  padding: 18px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-content h3 {
-  font-size: 1.2rem;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.sidebar-content button {
-  background: #2563eb;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 7px 12px;
-  margin-bottom: 6px;
-  cursor: pointer;
-  font-size: 0.95rem;
-  transition: all 0.25s;
-}
-.sidebar-content button:hover {
-  background: #1d4ed8;
-  transform: translateY(-1px);
-}
-
-.sidebar-content ul {
-  list-style: none;
-  padding: 0;
-  margin-top: 12px;
-  overflow-y: auto;
-  flex: 1;
-  scrollbar-width: thin;
-}
-
-.sidebar-content li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 9px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.25s;
-}
-.sidebar-content li:hover {
-  background: rgba(255,255,255,0.15);
-}
-.sidebar-content li.active {
-  background: #3b82f6;
-  font-weight: bold;
-}
-
-/* ================== Chat Area ================== */
-.chat-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 1.5rem;
-  background: #f9fafb;
-}
-
-.messages-container {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 1.2rem;
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 8px 18px rgba(0,0,0,0.06);
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-  scrollbar-width: thin;
-}
-
-.message {
-  display: flex;
-  max-width: 75%;
-  padding: 0.8rem 1rem;
-  border-radius: 14px;
-  word-break: break-word;
-  line-height: 1.5;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-  animation: fadeIn 0.25s ease;
-}
-.has-hex {
-  width: 25%;
-}
-
-.ai-message {
-  background: #e0f2fe;
-  align-self: flex-start;
-}
-
-.user-message {
-  background: #d1f7c4;
-  align-self: flex-end;
-}
-
-.message-role_ai,
-.message-role_user {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #666;
-  margin-top: 0.3rem;
-  opacity: 0.85;
-}
-
-.message-content pre {
-  background: #f6f8fa;
-  padding: 0.75rem;
-  border-radius: 10px;
-  overflow-x: auto;
-  font-family: 'Fira Code', monospace;
-  font-size: 0.9rem;
-}
-
-/* ================== Input ================== */
-.input-container {
-  display: flex;
-  gap: 0.6rem;
-  margin-top: 1rem;
-}
-
-.chat-input {
-  flex: 1;
-  padding: 0.8rem 1rem;
-  border-radius: 14px;
-  border: 1px solid #ddd;
-  font-size: 1rem;
-  outline: none;
-  transition: all 0.25s;
-  background: #fff;
-}
-.chat-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 6px rgba(59,130,246,0.35);
-}
-
-.btn-send, .btn-login {
-  padding: 0.8rem 1.2rem;
-  border-radius: 14px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.25s;
-}
-.btn-send:disabled {
-  background: #93c5fd;
-  cursor: not-allowed;
-}
-.btn-send:hover:not(:disabled),
-.btn-login:hover {
-  background: #1d4ed8;
-  transform: translateY(-1px);
-}
-
-/* ================== Suggestions ================== */
-.suggestions-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.6rem;
-}
-.suggestion-btn {
-  padding: 0.5rem 1rem;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background: #f9f9f9;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-}
-.suggestion-btn:hover {
-  background: #f1f5f9;
-  transform: translateY(-1px);
-}
-
-/* ================== Modal ================== */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 999;
-}
-.modal-content {
-  background: #d4e0e2;
-  padding: 1rem;
-  border-radius: 8px;
-  width: 70%;
-  height: 700px;
-  max-width: 420px;
-  box-shadow: 0 12px 36px rgba(0,0,0,0.25);
-  animation: fadeIn 0.3s ease;
-}
-.modal-buttons {
-  margin-top: 1.2rem;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.8rem;
-}
-.btn-edit-username {
-  margin-left: 0.6rem;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.85rem;
-}
-
-/* ================== Hex Grid ================== */
-.hex-grid {
-  margin: 12px auto;
-  width: 100%;                 /* pełna szerokość rodzica */
-  height: 100%;                /* pełna wysokość rodzica */
-  display: block;
-  aspect-ratio: attr(grid-cols) / attr(grid-rows); /* zachowaj proporcje */
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* Message Layout */
-.message-block {
-  margin-bottom: 1rem;
-  text-align: left;
-}
-.message-date {
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #666;
-  margin: 0.5rem 0;
-}
-.message-wrapper {
-  display: flex;
-  flex-direction: column;
-  max-width: 75%;
-}
-.user-wrapper { align-items: flex-end; margin-left: auto; }
-.ai-wrapper { align-items: flex-start; margin-right: auto; }
-
-.message-author {
-  font-size: 0.8rem;
-  font-weight: 600;
-  margin-bottom: 0.2rem;
-  color: #2563eb;
-}
-.user-wrapper .message-author { color: #16a34a; }
-
-.message {
-  padding: 0.8rem 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-}
-.user-message {
-  background: #d1f7c4;
-}
-.ai-message {
-  background: #e0f2fe;
-}
-.message-time {
-  font-size: 0.7rem;
-  color: #777;
-  margin-top: 0.3rem;
-}
-
-/* Archive fix */
-.archive-item {
-  background: #f9fafb;
-  padding: 0.6rem 0.8rem;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.archive-item .chat-name {
-  color: #111;
-  font-weight: 500;
-}
-
-
-.chat-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between; /* Nazwa po lewej, przycisk po prawej */
-  padding: 8px 12px;
-  border-bottom: 1px solid #ddd;
-}
-
-.chat-item.active {
-  background: #e5f3ff;
-}
-
-.chat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-
-.chat-name {
-  cursor: pointer;
-  flex-grow: 1;
-}
-
-.chat-actions {
-  position: relative;
-}
-
-.dots-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 18px;
-}
-
-/* Dropdown styled like <select> options */
-.chat-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.12);
-  z-index: 20;
-  min-width: 140px;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-menu button {
-  padding: 8px 12px;
-  text-align: left;
-  background: white;
-  border: none;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.chat-menu button:hover {
-  background: #f0f0f0;
-}
-
-.chat-menu button.danger {
-  color: #dc2626;
-}
-
-.chat-menu button.cass {
-  color: #455355;
-}
-
-.chat-menu button.danger:hover {
-  background: #fee2e2;
-}
-
-.chat-list-container {
-  display: flex;
-  max-height: 83.75%; /* Cały sidebar maksymalnie 80% wysokości ekranu */
-  flex-grow: 1;
-  overflow-y: auto;
-  flex-direction: column;
-  scrollbar-width: thin;
-}
-/* ================== Animations ================== */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.btn-mic {
-  background: #374151;
-  border: none;
-  color: white;
-  padding: 8px 12px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 18px;
-  margin-left: 6px;
-}
-
-.btn-mic.recording {
-  background: #ef4444; /* czerwone gdy nagrywa */
-  animation: pulse 1s infinite;
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(239,68,68, 0.6); }
-  70% { box-shadow: 0 0 0 10px rgba(239,68,68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(239,68,68, 0); }
-}
 </style>

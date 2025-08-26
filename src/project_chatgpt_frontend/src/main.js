@@ -76,6 +76,7 @@ const scrollToBottom = () => {
 };
 
 export const messages = ref([]);
+export const images = ref([]);
 export const chats = ref([]);
 export const archives = ref([]);
 export const current = ref(null);
@@ -125,7 +126,7 @@ export const rename = async (new_username) => {
 
 export const chat = async (message, tag) => {
   try {
-    const size = (messages.value.length > 6) ? 6 : messages.value.length;
+    const size = (messages.value.length > 7) ? 7 : messages.value.length;
     const history = messages.value.slice(-size).map(msg => [msg.role, msg.content]);
 
     // Dodaj wiadomość użytkownika
@@ -206,11 +207,23 @@ export const load_archives = async () => {
   archives.value = await project_chatgpt_backend.list_chats(loginStatus.value.principal, true);
 }
 
+export const load_images = async () => {
+  if (!loginStatus.value.loggedIn) return;
+  const result = await project_chatgpt_backend.get_all_images(loginStatus.value.principal);
+  if (!result || !result.messages) {
+    images.value = [];
+    return;
+  }
+  images.value = result.messages.flatMap(m => [
+    { image: m.content, etc: m.etc },
+  ]);
+}
+
 export const open = async (id) => {
-  //if (!loginStatus.value.loggedIn) return;
+  messages.value = [];
   current.value = id;
-  const len = chats.value.find(c => c.id === id).msg_len;
-  const result = await project_chatgpt_backend.get_chat_history(loginStatus.value.principal, id, len);
+  const len = chats.value.find(c => c.id === current.value).msg_len;
+  const result = await project_chatgpt_backend.get_chat_history(loginStatus.value.principal, current.value, len);
   if (!result || !result.messages) {
     messages.value = [];
     return;

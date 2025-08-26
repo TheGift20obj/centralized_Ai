@@ -73,10 +73,19 @@
 
         <!-- Mic button -->
         <button
-          class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded"
-          @click="micInput"
+          class="px-3 py-2 rounded"
+          :class="recognizing ? 'bg-gray-600' : 'bg-green-600 hover:bg-green-500'"
+          @click="startMic"
         >
           🎤
+        </button>
+
+        <button
+          class="px-3 py-2 rounded"
+          :class="recognizing ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-600'"
+          @click="stopMic"
+        >
+          ⏹
         </button>
 
         <!-- Send button -->
@@ -120,6 +129,12 @@
           v-model="imageParams.params"
           type="text"
           placeholder="Params"
+          class="w-32 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"
+        />
+        <input v-if="drawEnabled"
+          v-model="imageParams.radius"
+          type="text"
+          placeholder="Radius"
           class="w-32 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"
         />
         <input v-if="drawEnabled"
@@ -168,6 +183,7 @@ const imageParams = reactive({
   content: "",
   color: "",
   params: "",
+  radius: "",
   cords: ""
 })
 
@@ -188,7 +204,7 @@ const showMessageBox = ref(false);
 
 async function drawImage() {
   if (!imageParams.content.trim() || !imageParams.color.trim() || !imageParams.cords.trim()) return;
-  const temp = "Draw, Connect and Fill with color: " + imageParams.color + "], with content: " + imageParams.content + ", with params: " + imageParams.params + ", at cords: " + imageParams.cords;
+  const temp = "Draw, Connect and Fill [Color: " + imageParams.color + "] [Params: " + imageParams.params + "] [Content: " + imageParams.content + "] with Radius [" + imageParams.radius + "px] From [Cords: " + imageParams.cords + "]";
   try {
     tempBackup = messages.value[selectedMsg.value]?.content || '';
     const edited_pixels = await askAiDraw(temp, selectedModel.value, cropedValue.value);
@@ -199,11 +215,6 @@ async function drawImage() {
   } catch (error) {
     alert(error);
   }
-  
-  imageParams.content = '';
-  imageParams.color = '';
-  imageParams.params = '';
-  imageParams.cords = '';
 }
 
 const select_image = async (index) => {
@@ -286,8 +297,43 @@ async function sendMessage() {
   newMessage.value = ''
 }
 
-function micInput() {
-  alert('Mic input not implemented')
+let recognition = null;
+let recognizing = ref(false);
+
+function startMic() {
+  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+    alert("Your browser does not support speech recognition.");
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+
+  recognition.lang = "en-US"; // język rozpoznawania
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognizing.value = true;
+
+  recognition.onresult = (event) => {
+    let transcript = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    newMessage.value = transcript; // <-- tutaj wpisuje do inputa
+  };
+
+  recognition.onerror = (event) => {
+    console.error("Speech recognition error:", event.error);
+  };
+
+  recognition.onstart = () => { recognizing.value = true }
+  recognition.onend = () => { recognizing.value = false }
+
+  recognition.start();
+}
+
+function stopMic() {
+  if (recognition) {recognition.stop(); recognizing.value = false;};
 }
 
 const formatMarkdown = (text) => {
