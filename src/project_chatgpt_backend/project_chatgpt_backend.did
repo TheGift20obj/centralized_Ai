@@ -21,5 +21,5 @@ service : {
     archive_chat: (principal, vec nat8, bool) -> (bool);
     askaidraw: (text, text, text) -> (text);
     update_image: (principal, vec nat8, nat32, text) -> ();
-    "chat": (text, nat32, nat32, text, principal, vec nat8, nat32) -> (text);
+    "chat": (text, text, vec record {text; text}) -> (text);
 }

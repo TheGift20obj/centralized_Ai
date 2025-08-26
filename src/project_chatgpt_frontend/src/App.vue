@@ -1,28 +1,18 @@
 <script setup>
 import { ref, watch, onMounted, nextTick } from 'vue';
 import {
-  login,
-  loginStatus,
-  chatWithBackend,
-  createNewChat,
-  addChatMessage,
-  getChatHistory,
-  listChats,
-  deleteChat,
-  renameChat,
-  setUserName,
-  getUserName,
-  tryPrompt,
-  getRandomUserMessages,
-  archiveChat,
-  askAiDraw,
-  updateImage,
+  archives, archive_chat,
+  load,
+  load_archives
 } from './main.js';
-import HexGrid from './HexGrid.vue';
+import Sidebar from './Sidebar.vue';
+import Chat from './Chat.vue';
 
+/*
 const ctxName = ref('Moja Grafika');
 const cols = ref(3);
 const rows = ref(3);
+const ctxName = ref('');
 
 function demoColorGetter(y, x) {
   //if (y === x) return '#FF9900';
@@ -66,7 +56,7 @@ function hasHex(content) {
   // sprawdzamy czy w tekście jest co najmniej jeden #RRGGBB
   const hexRegex = /#[0-9A-Fa-f]{6}/g;
   return hexRegex.test(content);
-}
+}*/
 
 const formatMarkdown = (text) => {
   let formatted = text;
@@ -84,8 +74,8 @@ const formatMarkdown = (text) => {
   formatted = `<p>${formatted}</p>`;
 
   return formatted;
-};
-
+}
+/*
 const messages = ref([]);
 const userInput = ref('');
 const isLoggedIn = ref(false);
@@ -112,7 +102,7 @@ const cropedValue = ref('');
 
 const showMessageBox = ref(false);
 let tempBackup = ''; // Kopia starego obrazka
-
+/*
 function cropStringImage(imageStr, rect) {
   // Wyciągamy nazwę
   const nameMatch = imageStr.match(/Content:\s*(.*)\nImage:/);
@@ -149,7 +139,6 @@ function cropStringImage(imageStr, rect) {
 
 const handleSelectCell = ({ x, y }) => {
   const msg = `(x:${x-minX.value} layer, y:${y-minY.value} layer)`;
-  //const msg2 = `(x:${minX.value} layer, y:${minY.value} layer)`;
   userInput.value += " " + msg;
 };
 
@@ -399,8 +388,132 @@ onMounted(async () => {
     }
   }, 300);
 });
+*/
+const showSearch = ref(false)
+const showLibrary = ref(false)
+const showArchives = ref(false)
+
+function search() {
+  showSearch.value = true
+  showLibrary.value = false
+  showArchives.value = false
+}
+function openLibrary() {
+  showLibrary.value = true
+  showSearch.value = false
+  showArchives.value = false
+}
+async function openArchives() {
+  await load_archives()
+  showArchives.value = true
+  showLibrary.value = false
+  showSearch.value = false
+}
+function closeAll() {
+  showSearch.value = false
+  showLibrary.value = false
+  showArchives.value = false
+}
+
+async function archiveChatAction(id, archive) {
+  await archive_chat(id, archive)
+  await load_archives()
+}
 </script>
 
+<template>
+  <div class="flex h-screen w-screen">
+    <!-- Sidebar -->
+    <aside>
+      <Sidebar 
+        @search="search"
+        @open-library="openLibrary"
+        @open-archives="openArchives"
+      />
+    </aside>
+
+    <!-- Modal Search -->
+    <div
+      v-if="showSearch"
+      class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
+    >
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative">
+        <h2 class="text-lg font-semibold mb-4">Search</h2>
+        <input
+          type="text"
+          placeholder="Type to search..."
+          class="w-full bg-gray-800 border border-gray-700 p-2 rounded mb-4 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"
+          @click="closeAll"
+        >
+          ✖
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal Library -->
+    <div
+      v-if="showLibrary"
+      class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
+    >
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative">
+        <h2 class="text-lg font-semibold mb-4">Library</h2>
+        <p class="text-gray-300">Here you can see your saved documents or resources.</p>
+        <button
+          class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"
+          @click="closeAll"
+        >
+          ✖
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal Archives -->
+    <div
+      v-if="showArchives"
+      class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
+    >
+      <div class="bg-gray-900 text-gray-100 rounded-xl shadow-2xl w-1/2 h-3/4 p-6 relative flex flex-col">
+        <h2 class="text-lg font-semibold mb-4">Archives</h2>
+        <p class="text-gray-300">Your archived chats and files will appear here.</p>
+        <section class="flex-1 min-h-0 overflow-y-auto pr-1">
+          <ul class="space-y-1">
+            <li
+              v-for="chat in archives"
+              :key="chat.id"
+              class="p-2 rounded cursor-pointer hover:bg-gray-800 flex justify-between items-center"
+            >
+              <span class="truncate flex-1">{{ chat.name }}</span>
+              <button
+                @click="archiveChatAction(chat.id, false)"
+                class="px-2 py-1 rounded hover:bg-gray-700"
+              >
+                Restore
+              </button>
+            </li>
+          </ul>
+        </section>
+        <button
+          class="absolute top-2 right-2 text-gray-400 hover:text-gray-200"
+          @click="closeAll"
+        >
+          ✖
+        </button>
+      </div>
+    </div>
+
+
+    <!-- Main content area -->
+    <main class="w-full">
+      <Chat />
+    </main>
+  </div>
+</template>
+
+<style scoped>
+/*
 <template>
   <div class="app-wrapper">
     <!-- Sidebar -->
@@ -478,7 +591,7 @@ onMounted(async () => {
           <!-- User -->
           <div v-if="msg.role === 'user'" class="message-wrapper user-wrapper">
             <div class="message-author">{{ loginStatus.username }}</div>
-            <div class="message user-message">
+            <div class="message user-message" :class="{ 'has-hex': hasHex(msg.content) }">
               <template v-if="hasHex(msg.content)">
                 <HexGrid :content="msg.content" :grid-cols="msg.etc[1]" :grid-rows="msg.etc[2]" @selectCell="handleSelectCell" @selectArea="handleSelectRect" class="hex-grid" :style="{ aspectRatio: msg.etc[1] + ' / ' + msg.etc[2] }"/>
                 <div v-if="selectedModel.includes('Image')">
@@ -604,9 +717,7 @@ onMounted(async () => {
     </div>
   </div>
 </template>
-
-
-<style scoped>
+*/
 .message-box {
   position: absolute;
   top: 20%;
@@ -760,6 +871,9 @@ body, html {
   line-height: 1.5;
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
   animation: fadeIn 0.25s ease;
+}
+.has-hex {
+  width: 25%;
 }
 
 .ai-message {

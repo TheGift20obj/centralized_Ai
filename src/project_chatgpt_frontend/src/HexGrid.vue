@@ -5,7 +5,8 @@
       v-show="!showGrid" 
       ref="canvas" 
       :width="canvasWidth" 
-      :height="canvasHeight">
+      :height="canvasHeight"
+      style="width: 100%; height: 100%;">
     </canvas>
 
     <div 
@@ -13,9 +14,9 @@
       class="grid"
       :style="{
         display: 'grid',
-        gridTemplateColumns: `repeat(${gridCols}, ${cellSize}px)`,
-        gridTemplateRows: `repeat(${gridRows}, ${cellSize}px)`,
-        gap: '1px'
+        gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+        gridTemplateRows: `repeat(${gridRows}, 1fr)`,
+        gap: '1px',
       }"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
@@ -28,8 +29,8 @@
           class="cell-btn"
           :class="{ selected: isInSelection(c-1, r-1) }"
           :style="{
-            width: cellSize + 'px',
-            height: cellSize + 'px',
+            width: '100%',//cellSize + 'px',
+            aspectRatio: '1 / 1',//cellSize + 'px',
             backgroundColor: getCellColor(c-1, r-1)
           }"
           @click="gridMode === 'cell' ? selectCell(c-1, r-1) : null"
@@ -93,8 +94,15 @@ const endSelection = () => {
 
 const getCellFromMouse = (e) => {
   const gridRect = e.currentTarget.getBoundingClientRect();
-  const c = Math.floor((e.clientX - gridRect.left) / (props.cellSize + 1));
-  const r = Math.floor((e.clientY - gridRect.top) / (props.cellSize + 1));
+
+  // Normalizujemy kliknięcie do [0,1]
+  const relX = (e.clientX - gridRect.left) / gridRect.width;
+  const relY = (e.clientY - gridRect.top) / gridRect.height;
+
+  // Mnożymy przez liczbę kolumn/wierszy
+  const c = Math.floor(relX * props.gridCols);
+  const r = Math.floor(relY * props.gridRows);
+
   return { c, r };
 };
 

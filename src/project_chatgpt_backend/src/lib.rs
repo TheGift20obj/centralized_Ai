@@ -506,14 +506,7 @@ async fn askaidraw(query: String, tag: String, msg_content: String) -> String {
 }
 
 #[update]
-async fn chat(prompt: String, width: u32, height: u32, tag: String, user: Principal, chat_id: [u8; 16], msg_len: u32) -> String {
-    let msgs = get_msgs_for_user(user, chat_id, msg_len);
-    let rows = height;
-    let cols = width;
-    let new_prompt = prompt.clone();
-
-    let mut max_history = 5;
-
+async fn chat(prompt: String, tag: String, history: Vec<(String, String)>) -> String {
     let model = match tag.as_str() {
         "Llama3_1_8B" => {
             Model::Llama3_1_8B
@@ -524,82 +517,33 @@ async fn chat(prompt: String, width: u32, height: u32, tag: String, user: Princi
         "Llama4Scout" => {
             Model::Llama4Scout
         }
-        "Llama4Scout_Image" => {
-            max_history = 4;
-            Model::Llama4Scout
-        }
-        "Llama3_1_8B_Image" => {
-            max_history = 4;
-            Model::Llama3_1_8B
-        }
         _ => {
             Model::Llama3_1_8B
         }
     };
 
-    let mut messages = vec![];
-    let history: Vec<_> = msgs.messages
-        .iter()
-        .rev()               // idziemy od końca
-        .take(max_history)   // bierzemy tylko max_history
-        .collect::<Vec<_>>() // tworzymy wektor
-        .into_iter()
-        .rev()               // przywracamy kolejność od starszych do nowszych
-        .collect();
+    let mut messages = Vec::new();
     for message in &history {
-        match message.role.as_str() {
+        match message.0.as_str() {
             "user" => {
                 messages.push(
                     ChatMessage::User {
-                        content: message.content.clone(),
+                        content: message.1.clone(),
                 })
             }
             _ => {
                 messages.push(
                     ChatMessage::Assistant (
                         AssistantMessage {
-                            content: Some(message.content.clone()),
-                            tool_calls: vec![], // jeśli nie używasz żadnych narzędzi
+                            content: Some(message.1.clone()),
+                            tool_calls: vec![],
                         }
                 ))
             }
         }
     }
 
-    match tag.as_str() {
-        "Llama4Scout_Image" | "Llama3_1_8B_Image" => {
-            // budujemy specjalny system prompt dla HEX
-            let sys_prompt = format!(
-                "You are an AI that only outputs pixel-art in HEX grid format.
-
-                Output rules (must be followed exactly):
-                  1. Represent the image only as HEX color codes (#RRGGBB).
-                  2. Each row must have exactly {cols} HEX codes.
-                  3. Use exactly {rows} rows.
-                  4. Do not include explanations or extra text.
-                  5. After all rows, add: Summary: {rows} rows, each with {cols} HEXs (total {rows}x{cols} HEXs)."
-            );
-
-            let user_prompt = format!(
-                "Generate, imaginate a pixel-art style {} image of size {rows}x{cols}.",
-                prompt
-            );
-
-            messages.push(
-                ChatMessage::System { content: sys_prompt },
-            );
-
-            messages.push(
-                ChatMessage::User { content: user_prompt },
-            );
-        }
-        _ => {
-            messages.push(
-                ChatMessage::User {
-                    content: new_prompt.clone(),
-            });
-        }
-    }
+    messages.push(ChatMessage::User { content: prompt });
 
     let builder = ChatBuilder::new(model).with_messages(messages.clone());
     let response = builder.send().await;
