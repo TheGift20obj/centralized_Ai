@@ -89,10 +89,10 @@ export const loginStatus = ref({
 })
 
 export const login = async () => {
-  loginStatus.value.loggedIn = true;
-  loginStatus.value.principal = Principal.fromText("aaaaa-aa");
-  loginStatus.value.username = await project_chatgpt_backend.get_user_name(loginStatus.value.principal);
-  /*const authClient = await AuthClient.create();
+  //loginStatus.value.loggedIn = true;
+  //loginStatus.value.principal = Principal.fromText("aaaaa-aa");
+  //loginStatus.value.username = await project_chatgpt_backend.get_user_name(loginStatus.value.principal);
+  const authClient = await AuthClient.create();
 
   await authClient.login({
     identityProvider: "https://identity.ic0.app/#authorize",
@@ -103,7 +103,7 @@ export const login = async () => {
       loginStatus.principal = principal;
       loginStatus.username = await getUserName(loginStatus.principal);
     },
-  });*/
+  });
   await load();
 };
 
@@ -111,11 +111,10 @@ export const logout = async () => {
   loginStatus.value.loggedIn = false;
   loginStatus.value.principal = null;
   loginStatus.value.username = "user";
-  /*const authClient = await AuthClient.create();
+  const authClient = await AuthClient.create();
 
   // Perform the logout operation
   await authClient.logout();
-  */
   messages.value = [];
 };
 
